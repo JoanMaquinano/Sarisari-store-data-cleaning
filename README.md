@@ -1,174 +1,287 @@
-Build the Clean Layer with SQL
-Project Overview
+# Build the Clean Layer with SQL
 
-This project focuses on building a clean data layer from a raw sales dataset using SQL in Databricks. The objective is to identify and resolve data quality issues, standardize values, enforce proper data types, remove duplicates, and create a clean table ready for analysis.
+## 📌 Project Overview
 
-Objective
+This project focuses on transforming raw sales data into a clean, reliable, and analysis-ready dataset using SQL in Databricks.
 
-Create a clean and consistent silver.sarisari_sales table that can be used reliably for reporting and analytics.
+The workflow follows common data engineering practices used in the Silver Layer of a medallion architecture, where raw data is cleaned, standardized, validated, and prepared for downstream reporting and analytics.
 
-Expected Output
-Clean dataset
-Consistent formatting across records
-Correct data types
-No unnecessary duplicates
-Analysis-ready silver table
-Step 1: Inspect the Raw Data for Quality Problems
-Goal
+## 🎯 Objective
 
-Understand the current state of the raw dataset before making any changes.
+Create a clean and consistent table called:
 
-Substeps
-1.1 Review Table Structure
-Identify all columns.
-Review existing data types.
-Check for columns that appear to have incorrect data types.
-1.2 Check Row Volume
-Count total records.
-Identify unusually small or large datasets.
-1.3 Look for Missing Values
-Check each column for null values.
-Identify columns with a high percentage of missing data.
-1.4 Look for Invalid Values
-Search for blank strings.
-Search for placeholder values such as:
-N/A
-Unknown
-Null
-Check for impossible values (negative sales, invalid dates, etc.).
-1.5 Identify Inconsistent Formats
-Review text fields.
-Check for inconsistent capitalization.
-Check for leading or trailing spaces.
-Check for spelling variations.
-1.6 Check for Duplicates
-Determine whether duplicate rows exist.
-Identify possible duplicate business records.
-Deliverable
+`silver.sarisari_sales`
 
-A summary of all data quality issues discovered.
+The final table should contain high-quality data that can be trusted for business analysis and reporting.
 
-Step 2: Fix Missing or Invalid Values
-Goal
+---
 
-Improve data completeness and accuracy.
+## ✅ Expected Outcome
 
-Substeps
-2.1 Define Missing Data Rules
-Determine which fields are required.
-Determine which fields can remain null.
-2.2 Handle Null Values
-Replace nulls where appropriate.
-Retain nulls when no valid replacement exists.
-2.3 Handle Blank Values
-Convert empty strings into a consistent format.
-Ensure blanks are treated correctly.
-2.4 Correct Invalid Values
-Fix impossible values.
-Replace placeholder values with valid values or nulls.
-2.5 Validate Results
-Recheck columns after corrections.
-Confirm missing-value counts have improved.
-Deliverable
+A dataset that is:
 
-Dataset with missing and invalid values addressed.
+- Complete and reliable
+- Free of major data quality issues
+- Consistent in formatting
+- Stored using proper data types
+- Free of unnecessary duplicates
+- Ready for analysis and reporting
 
-Step 3: Standardize Inconsistent Text
-Goal
+---
 
-Ensure text values follow a consistent format.
+# Project Workflow
 
-Substeps
-3.1 Standardize Capitalization
-Apply a consistent text format.
-Ensure values do not differ only by case.
-3.2 Remove Unwanted Spaces
-Remove leading spaces.
-Remove trailing spaces.
-Remove unnecessary extra spaces.
-3.3 Standardize Categories
-Identify category variations.
-Consolidate equivalent values.
-3.4 Validate Consistency
-Review unique values.
-Confirm duplicate categories no longer exist.
-Deliverable
+## 1. Inspect the Raw Data for Quality Problems
 
-Consistent text values across all categorical columns.
+### Goal
 
-Step 4: Cast Columns to the Correct Data Types
-Goal
+Understand the current condition of the dataset before applying any transformations.
 
-Ensure each column uses the appropriate data type.
+### Tasks
 
-Substeps
-4.1 Review Business Meaning
-Determine the expected data type for each column.
-4.2 Convert Numeric Fields
-Convert sales, quantity, and similar columns to numeric types.
-Verify conversion success.
-4.3 Convert Date Fields
-Convert date columns to date format.
-Check for invalid date records.
-4.4 Convert Text Fields
-Ensure descriptive attributes remain text.
-4.5 Validate Schema
-Review the updated schema.
-Confirm all columns have appropriate data types.
-Deliverable
+#### Review the table structure
 
-Dataset with an analysis-ready schema.
+- Identify all available columns
+- Review current column data types
+- Look for suspicious or incorrect data types
 
-Step 5: Remove Unwanted Duplicates
-Goal
+#### Analyze record volume
+
+- Determine the total number of records
+- Verify that the dataset loaded correctly
+
+#### Identify missing values
+
+- Check for `NULL` values
+- Check for blank values
+- Compare missing-value counts across columns
+
+#### Identify invalid values
+
+- Look for placeholder values such as:
+  - N/A
+  - Unknown
+  - Null
+  - -
+- Look for impossible values such as:
+  - Negative quantities
+  - Negative sales amounts
+  - Invalid dates
+
+#### Check text consistency
+
+- Review capitalization differences
+- Review spelling variations
+- Review extra spaces
+
+#### Check for duplicates
+
+- Search for duplicate rows
+- Identify duplicate business records
+
+### Deliverable
+
+A complete inventory of all identified data quality issues.
+
+---
+
+## 2. Fix Missing or Invalid Values
+
+### Goal
+
+Improve the completeness and accuracy of the dataset.
+
+### Tasks
+
+#### Define handling rules
+
+- Identify required fields
+- Identify optional fields
+- Determine acceptable missing-value treatments
+
+#### Handle missing values
+
+- Replace missing values where appropriate
+- Retain values as `NULL` when no valid replacement exists
+
+#### Handle blank values
+
+- Convert empty strings into a consistent format
+- Ensure blanks are treated consistently across columns
+
+#### Correct invalid values
+
+- Fix incorrect entries
+- Replace placeholder values
+- Remove impossible values when necessary
+
+#### Validate results
+
+- Recheck missing-value counts
+- Confirm corrections were applied successfully
+
+### Deliverable
+
+A dataset with missing and invalid values addressed.
+
+---
+
+## 3. Standardize Inconsistent Text
+
+### Goal
+
+Ensure text-based fields follow a consistent format.
+
+### Tasks
+
+#### Standardize capitalization
+
+- Apply a consistent text format
+- Eliminate case-sensitive variations
+
+#### Remove unnecessary spaces
+
+- Remove leading spaces
+- Remove trailing spaces
+- Remove extra spaces between words
+
+#### Standardize categories
+
+- Consolidate equivalent category values
+- Correct text inconsistencies
+
+#### Verify unique values
+
+- Review distinct category values
+- Confirm duplicate variations have been removed
+
+### Deliverable
+
+A dataset with consistent and standardized text fields.
+
+---
+
+## 4. Cast Columns to the Correct Data Types
+
+### Goal
+
+Ensure every column uses the most appropriate data type.
+
+### Tasks
+
+#### Review business requirements
+
+- Identify expected data type for every column
+
+#### Convert numeric fields
+
+- Convert quantity fields to numeric types
+- Convert sales-related fields to numeric types
+
+#### Convert date fields
+
+- Convert date columns into proper date formats
+- Identify invalid date records
+
+#### Validate text fields
+
+- Ensure descriptive fields remain text-based
+
+#### Validate schema
+
+- Review the final schema
+- Confirm all data types are correct
+
+### Deliverable
+
+A dataset with an analysis-ready schema.
+
+---
+
+## 5. Remove Unwanted Duplicates
+
+### Goal
 
 Ensure every record is unique and trustworthy.
 
-Substeps
-5.1 Define Duplicate Criteria
-Determine what constitutes a duplicate record.
-Identify key columns for comparison.
-5.2 Detect Duplicates
-Count duplicate records.
-Review duplicate patterns.
-5.3 Remove Duplicate Records
-Retain only the correct version of each record.
-Remove redundant records.
-5.4 Validate Results
-Recheck row counts.
-Confirm duplicates have been removed.
-Deliverable
+### Tasks
 
-Dataset containing only unique records.
+#### Define duplicate criteria
 
-Step 6: Create silver.sarisari_sales
-Goal
+- Determine which columns define uniqueness
+- Establish duplicate-identification rules
 
-Store the cleaned dataset in the silver layer.
+#### Analyze duplicate records
 
-Substeps
-6.1 Verify Final Dataset
-Review row counts.
-Review schema.
-Review sample records.
-6.2 Create Silver Table
-Save the cleaned data as silver.sarisari_sales.
-6.3 Perform Final Validation
-Confirm table creation succeeded.
-Confirm record counts match expectations.
-Confirm all cleaning rules were applied.
-Deliverable
+- Count duplicates
+- Understand duplicate patterns
 
-silver.sarisari_sales table ready for business analysis.
+#### Remove duplicate records
 
-Success Criteria
+- Keep only valid records
+- Remove redundant duplicates
 
-The project is successful when:
+#### Validate results
 
-Missing values are handled appropriately.
-Invalid values are corrected or removed.
-Text values are standardized.
-Data types are accurate.
-Duplicate records are removed.
-silver.sarisari_sales is created successfully.
-The final table is clean, consistent, and analysis-ready.
+- Compare row counts before and after removal
+- Confirm duplicate issues have been resolved
+
+### Deliverable
+
+A dataset with duplicate records removed.
+
+---
+
+## 6. Create `silver.sarisari_sales`
+
+### Goal
+
+Persist the cleaned dataset in the Silver Layer.
+
+### Tasks
+
+#### Perform final validation
+
+- Review row counts
+- Review schema
+- Review sample records
+
+#### Create the silver table
+
+- Save the cleaned dataset as:
+  - `silver.sarisari_sales`
+
+#### Verify output
+
+- Confirm table creation succeeded
+- Confirm data quality improvements are present
+- Confirm the table is ready for analysis
+
+### Deliverable
+
+A production-ready Silver Layer table.
+
+---
+
+# Success Criteria
+
+The project is considered successful when:
+
+- All major data quality issues are identified
+- Missing values are handled appropriately
+- Invalid values are corrected or removed
+- Text fields are standardized
+- Columns use appropriate data types
+- Duplicate records are removed
+- `silver.sarisari_sales` is created successfully
+- The final dataset is clean, consistent, and analysis-ready
+
+---
+
+## Final Output
+
+**Table Name:** `silver.sarisari_sales`
+
+**Layer:** Silver
+
+**Purpose:** Clean, standardized, and analysis-ready sales dataset for reporting and business insights.
