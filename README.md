@@ -43,15 +43,15 @@ Identify data quality issues that may affect reporting, analysis, and downstream
 | Date | No issues detected |
 | Item | Inconsistent item descriptions |
 | Item | Missing values |
-| Payment_Method | Typographical errors |
-| Payment_Method | Invalid payment methods |
 | Quantity | Invalid quantity values |
 | Quantity | Quantities stored as text (e.g., `"two"`) |
-| Total_Amount | Negative values |
-| Total_Amount | Total amount does not match Unit Price × Quantity |
-| Unit_Price | Missing values |
 | Unit_Price | Different prices for the same item |
 | Unit_Price | Negative values |
+| Unit_Price | Missing values |
+| Total_Amount | Negative values |
+| Total_Amount | Total amount does not match Unit Price × Quantity |
+| Payment_Method | Typographical errors |
+| Payment_Method | Invalid payment methods |
 | Customer_Type | Missing values |
 | Customer_Type | Invalid customer type values (`123`) |
 | Customer_Type | Unapproved customer category (`Neighbor`) |
@@ -138,7 +138,7 @@ WHERE Item IS NULL
 OR TRIM(Item) = '';
 ```
 
-From here, we confirmed there are 253 missing Item values.
+From here, we confirmed there are 250 missing Item values.
 
 ```sql
 -- Checking for patterns in null values
@@ -190,57 +190,55 @@ Reason:
 SELECT
 Quantity,
 COUNT(*) AS record_count
-FROM silver_sari*ari
+FROM silver_sarisari
 GROUP BY Quantity
-ORDER BY Qua*tity;
+ORDER BY Quantity;
 
 -- Checking an outlier
-SELE*T *
+SELECT *
 FROM silver_sarisari
-WHERE Qua*tity = '353';
+WHERE Quantity = '353';
 
--- Check for actual*expected quantity
+-- Check for actual expected quantity
 SELECT
-Quant*ty,
+Quantity,
 Unit_Price,
-Total_Amou*t,
-Total_Amount / Unit_Price A* expected_quantity
-FROM silver_sar*sari
+Total_Amount,
+Total_Amount / Unit_Price AS expected_quantity
+FROM silver_sarisari
 WHERE Quantity = '353';
 ```
 
-*#### Why keep NULLs?
+##### Why keep NULLs?
 
-- There are *42 missing quantities.
-- Unlike 35*, there is not enough information *o reliably derive all missing valu*s.
-- Imputing values would introdu*e assumptions into the dataset.
+- There are 242 missing quantities.
+- Unlike with value 353, there is not enough information to reliably derive all missing values.
+- Imputing values would introduce assumptions into the dataset.
 
-#*### Why fix 353?
+##### Why fix 353?
 
-Investigation sh*wed that 353 is not the true quant*ty.
+Investigation showed that 353 is not the true quantity.
 
 ```sql
--- Analyzing NULL and *egative Unit_Price values under th* 353 quantities
+-- Analyzing NULL and negative Unit_Price values under the 353 quantities
 SELECT *
-FROM silv*r_sarisari
+FROM silver_sarisari
 WHERE Quantity = '353'
-*ND (
+AND (
 Unit_Price IS NULL
-OR*Unit_Price <= 0
+OR Unit_Price <= 0
 );
 ```
 
-We found **3 exception records** among the 50*rows with `Quantity = 353`. Two ha* `NULL` Unit_Price values and one *ontained a negative Unit_Price val*e. These were addressed before cal*ulating replacement quantities usi*g:
+We found **3 exception records** among the 50 rows with `Quantity = 353`. Two has `NULL` Unit_Price values and one contained a negative Unit_Price value. These were addressed before calculating replacement quantities using:
 
-```text
-Quantity = Total_Amoun* / Unit_Price
-```
+Quantity = Total_Amount / Unit_Price
 
 ```sql
--- Chang* 'two' to 2, derive values using t*e formula for positive values,
--- *nter negative values as NULL
+-- Change 'two' to 2, derive values using the formula for positive values,
+-- Enter negative values as NULL
 
-CREA*E OR REPLACE TEMP VIEW silver_sarisari_v2 AS
+CREATE OR REPLACE TEMP VIEW silver_sarisari_v2 AS
 SELECT
 Transaction_ID,
 Date,
@@ -294,48 +292,60 @@ ORDER BY Quantity;
 ```sql
 -- Check number of null values
 SELECT COUNT(*) AS missing_unit_price
-FROM silve*_sarisari_v2
-WHERE Unit_Price IS N*LL;
+FROM silver_sarisari_v2
+WHERE Unit_Price IS NULL;
 
--- Check which ones can be de*ived
+-- Check which ones can be derived
 SELECT
 Item,
-Quantity*
+Quantity,
 Total_Amount,
-ROUND(Total*Amount / Quantity, 2) AS expected_*nit_price
+ROUND(Total_Amount / Quantity, 2) AS expected_unit_price
 FROM silver_sarisari_v2
-*HERE Unit_Price IS NULL
-AND Quan*ity IS NOT NULL
-AND Quantity > 0*LIMIT 20;
+WHERE Unit_Price IS NULL
+AND Quantity IS NOT NULL
+AND Quantity > 0 LIMIT 20;
+
+-- Recoverable missing Unit_Price
+SELECT COUNT(*) AS recoverable
+FROM silver_sarisari_v2
+WHERE Unit_Price IS NULL
+  AND Quantity IS NOT NULL
+  AND Quantity > 0;
+
+-- Unrecoverable missing Unit_Price
+SELECT COUNT(*) AS cannot_be_recovered
+FROM silver_sarisari_v2
+WHERE Unit_Price IS NULL
+  AND (Quantity IS NULL OR Quantity <= 0);
 ```
 
-Formula used:
+Formula used to derive unit prices:
 
-```t*xt
-Unit_Price = Total_Amount ÷ Qua*tity
-```
+Unit_Price = Total_Amount ÷ Quantity
+
 
 ##### Findings
 
-| Metric*| Count |
+| Metric | Count |
 |----------|------:|
-| M*ssing Unit_Price | 242 |
-| Recover*ble | 230 |
-| Cannot be Recovered * 12 |
+| Missing Unit_Price | 242 |
+| Recoverable | 230 |
+| Cannot be Recovered | 12 |
 
 ```sql
-CREATE OR REPLACE TE*P VIEW silver_sarisari_v3 AS
-SELEC*
+CREATE OR REPLACE TEMP VIEW silver_sarisari_v3 AS
+SELECT
 Transaction_ID,
 Date,
-*Item,
+Item,
 Quantity,
 
 CASE
-* WHEN Unit_Price IS NULL
-* AND Quantity IS NOT NULL
-* AND Quantity > 0
-* THEN ROUND(Total_Amount / Quanti*y, 2)
+ WHEN Unit_Price IS NULL
+ AND Quantity IS NOT NULL
+ AND Quantity > 0
+ THEN ROUND(Total_Amount / Quantity, 2)
 
 ELSE Unit_Price
 END AS Unit_Price,
@@ -344,6 +354,11 @@ Total_Amount,
 Payment_Method,
 Customer_Type
 FROM silver_sarisari_v2;
+
+-- Validate remaining missing Unit_Price values
+SELECT COUNT(*) AS missing_unit_price_after_cleaning
+FROM silver_sarisari_v3
+WHERE Unit_Price IS NULL;
 ```
 
 ##### Summary
@@ -354,7 +369,7 @@ FROM silver_sarisari_v2;
 | Recoverable Using Total_Amount ÷ Quantity | 230 |
 | Missing Unit_Price After Cleaning | 12 |
 
-Now let's investigate the next Unit_Price issue.
+Investigating the next Unit_Price issue:
 
 ```sql
 -- Check negative values
@@ -370,24 +385,25 @@ AND Quantity IS NOT NULL
 AND Quantity > 0;
 
 -- Check unrecoverable
-SELECT COUNT(*) AS unrecoverable_negative_prices*FROM silver_sarisari_v3
-WHERE Unit*Price < 0
-AND (Quantity IS NULL *R Quantity <= 0);
+SELECT COUNT(*) AS unrecoverable_negative_prices
+FROM silver_sarisari_v3
+WHERE Unit_Price < 0
+AND (Quantity IS NULL OR Quantity <= 0);
 ```
 
-##### Findi*gs
+##### Findings
 
 | Metric | Count |
-|----------*------:|
-| Negative Unit_Price Val*es | 101 |
+|------------------:|
+| Negative Unit_Price Values | 101 |
 | Recoverable | 94 |
-| *nrecoverable | 7 |
+| Unrecoverable | 7 |
 
 ```sql
--- Deal*with the recoverable values
-CREATE*OR REPLACE TEMP VIEW silver_sarisa*i_v4 AS
+-- Deal with the recoverable values
+CREATE OR REPLACE TEMP VIEW silver_sarisari_v4 AS
 SELECT
-Transaction_ID,* Date,
+Transaction_ID, Date,
 Item,
 Quantity,
 
@@ -418,15 +434,33 @@ FROM silver_sarisari_v3;
 SELECT COUNT(*) AS negative_unit_price
 FROM silver_sarisari_v4
 WHERE Unit_Price < 0;
+
+-- Validate remaining missing Unit_Price values
+SELECT COUNT(*) AS missing_unit_price_after_negative_cleanup
+FROM silver_sarisari_v4
+WHERE Unit_Price IS NULL;
 ```
 
 Three values remain unchanged.
 
 ```sql
 -- Check the remaining negative values
+SELECT COUNT(*) AS remaining_negative_unit_price
+FROM silver_sarisari_v4
+WHERE Unit_Price < 0;
+-- Check for count
 SELECT *
 FROM silver_sarisari_v4
 WHERE Unit_Price < 0;
+
+SELECT
+    Quantity,
+    Unit_Price,
+    Total_Amount,
+    ROUND(Total_Amount / Quantity, 2) AS expected_unit_price
+FROM silver_sarisari_v4
+WHERE Unit_Price < 0;
+
 ```
 
 Upon checking, these three records have calculations that are mathematically correct. They were therefore left unchanged.
@@ -443,7 +477,7 @@ WHERE Quantity IS NOT NULL
 AND Unit_Price IS NOT NULL
 AND ROUND(Quantity * Unit_Price, 2) <> ROUND(Total_Amount, 2);
 
--- Quantify problem
+-- Measure the number of affected records
 SELECT COUNT(*) AS mismatched_records
 FROM silver_sarisari_v4
 WHERE Quantity IS NOT NULL
@@ -463,6 +497,11 @@ WHERE Quantity IS NOT NULL
 AND Unit_Price IS NOT NULL
 AND ROUND(Quantity * Unit_Price, 2) <> ROUND(Total_Amount, 2)
 GROUP BY issue_type;
+
+-- Validate whether the invalid Unit_Price value still exists
+SELECT COUNT(*) AS invalid_unit_price_records
+FROM silver_sarisari_v4
+WHERE Unit_Price = 895.7434614547262;
 ```
 
 ##### Findings
@@ -505,31 +544,42 @@ FROM silver_sarisari_v5
 WHERE Quantity IS NOT NULL
 AND Unit_Price IS NOT NULL
 AND ROUND(Quantity * Unit_Price, 2) <> ROUND(Total_Amount, 2);
+
+-- Count records where implied quantity differs from recorded quantity
+SELECT COUNT(*) AS quantity_mismatch_records
+FROM silver_sarisari_v5
+WHERE Quantity IS NOT NULL
+  AND Unit_Price IS NOT NULL
+  AND Total_Amount > 0
+  AND ROUND(Quantity * Unit_Price, 2) <> ROUND(Total_Amount, 2)
+  AND Quantity <> ROUND(Total_Amount / Unit_Price, 0);
 ```
 
 The `implied_quantity` values are not random. This strongly suggests that **Quantity is the incorrect field**, not `Total_Amount`.
 
 ```sql
--- Investigate quantity values
-SELECT
-Quantity,
-Unit_Price,
-Total_Amount,
-ROUND(Total_Amount / Unit_Price, 0) AS implied_quantity
+-- Count positive mismatch records
+SELECT COUNT(*) AS positive_mismatch_records
 FROM silver_sarisari_v5
 WHERE Quantity IS NOT NULL
 AND Unit_Price IS NOT NULL
 AND Total_Amount > 0
 AND ROUND(Quantity * Unit_Price, 2) <> ROUND(Total_Amount, 2);
+
+-- Count records where implied quantity differs from recorded quantity
+SELECT COUNT(*) AS quantity_mismatch_records
+FROM silver_sarisari_v5
+WHERE Quantity IS NOT NULL
+AND Unit_Price IS NOT NULL
+AND Total_Amount > 0
+AND ROUND(Quantity * Unit_Price, 2) <> ROUND(Total_Amount, 2)
+AND Quantity <> ROUND(Total_Amount / Unit_Price, 0);
 ```
 
 Every remaining positive mismatch has `Quantity = 2`, but the implied quantity is different.
 
-**Finding:** 79 records were identified where `Quantity × Unit_Price` did not equal `Total_Amount`.
-
-Investigation showed that the implied quantity frequently differed from the recorded quantity, suggesting potential data-entry errors in the Quantity field.
-
-No automated correction was performed. Records were flagged for manual review.
+**Finding:** 79 records classified as Other Mismatch were further investigated.
+Analysis of the implied quantity values suggested that the Quantity field may contain data-entry errors, as the calculated quantity frequently differed from the recorded quantity.
 
 ---
 
@@ -678,3 +728,116 @@ The increase in NULL values is expected because the invalid customer types `123`
 
 As a result, all invalid customer type values were successfully removed, leaving only the approved customer categories (`Regular` and `Walk-in`) and records with missing customer type information.
 
+---
+
+# 3. Final Validation and Output Creation
+
+### Goal
+
+Perform final quality checks on the cleaned dataset and create the final Silver Layer table for reporting and analysis.
+
+#### Final Validation
+
+Before publishing the dataset, a series of validation checks were performed to ensure that the cleaning process was successfully applied and that the dataset was suitable for downstream use.
+
+##### Validate Row Count
+
+```sql
+SELECT COUNT(*) AS final_row_count
+FROM silver_sarisari_final;
+```
+
+This confirms the final number of records remai*ing after all cleaning activities.
+##### Validate Schema
+
+```sql
+DESCRIBE silver_sarisari_final;
+```
+
+This confirms that all columns are present and stored using the expected data types.
+
+##### Review Final Data Quality
+
+```sql
+SELECT
+    COUNT(*) AS total_records,
+    COUNT(CASE WHEN Item IS NULL THEN 1 END) AS missing_items,
+    COUNT(CASE WHEN Quantity IS NULL THEN 1 END) AS missing_quantities,
+    COUNT(CASE WHEN Unit_Price IS NULL THEN 1 END) AS missing_unit_prices,
+    COUNT(CASE WHEN Payment_Method IS NULL THEN 1 END) AS missing_payment_methods,
+    COUNT(CASE WHEN Customer_Type IS NULL THEN 1 END) AS missing_customer_types
+FROM silver_sarisari_final;
+```
+
+This provides a final summary of remaining missing values that could not be reliably corrected.
+
+##### Review Sample Records
+
+```sql
+SELECT *
+FROM silver_sarisari_v6
+LIMIT 20;
+```
+
+A sample review was conducted to verify that cleaning rules were applied correctly and that values appeared reasonable.
+
+---
+
+### Create the Final Silver Table
+
+After validation was completed, the cleaned dataset was persisted to the Silver Layer.
+
+```sql
+CREATE OR REPLACE TABLE d4_indiv.silver_sarisari_final AS
+SELECT *
+FROM silver_sarisari_v6;
+```
+
+---
+
+### Verify Table Creation
+
+```sql
+SELECT COUNT(*) AS final_record_count
+FROM silver_sarisari_final;
+```
+
+```sql
+SELECT *
+FROM silver_sarisari_final
+LIMIT 20;
+```
+
+These checks confirm that:
+
+- The table was successfully created.
+- The expected records were loaded.
+- The final dataset is available for analysis and reporting.
+
+---
+
+## Final Outcome
+
+The Silver Layer dataset was successfully created and contains:
+
+- Duplicate records removed
+- Invalid quantity valuee corrected where recoverable
+- Missing Unit_Price values recovered where possible
+- Invalid payment meth*ds standardized
+- Invalid customer*type values removed
+- Data quality issues investigated and documented
+- Remaining unresolved records retained for manual review rather than modified through assumptions
+
+The resulting dataset is cleaner, more consistent, and better suited for reporting, dashboarding, and further analytical work.
+
+---
+
+## Final Output
+
+| Attribute | Value |
+|-----------|--------|
+| Table Name | `workspace.d4_indiv.silver_sarisari_final` |
+| Layer | Silver |
+| Purpose | Cleaned and analysis-ready sales dataset |
+| Source | `workspace.d4_indiv.bronze_sarisari` |
+| Final Record Count | 5,005 |
