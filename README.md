@@ -279,6 +279,14 @@ COUNT(*) AS record_count
 FROM silver_sarisari_v2
 GROUP BY Quantity
 ORDER BY Quantity;
+
+-- Validating results
+SELECT
+Quantity,
+COUNT(*) AS record_count
+FROM silver_sarisari_v2
+GROUP BY Quantity
+ORDER BY Quantity;
 ```
 
 ##### Results
@@ -317,6 +325,7 @@ There are 242 starting null values, 230 of which can be recovered.
 
 ##### Cleaning by correcting recoverable prices
 ```sql
+-- Correct recoverable prices
 CREATE OR REPLACE TEMP VIEW silver_sarisari_v3 AS
 SELECT
 Transaction_ID,
@@ -370,11 +379,6 @@ Item,
 Quantity,
 
 CASE
-WHEN Unit_Price IS NULL
-AND Quantity IS NOT NULL
-AND Quantity > 0
-THEN ROUND(Total_Amount / Quantity, 2)
-
 WHEN Unit_Price < 0
 AND Quantity IS NOT NULL
 AND Quantity > 0
@@ -417,10 +421,100 @@ Unit_Price = Total_Amount ÷ Quantity
 
 
 ##### Results
-We were able to correct the 50 negative values that had unit prices that can be derived by using the formula:
-Unit_Price = Total_Amount ÷ Quantity 
+We were able to correct the 50 negative values that had unit prices that can be derived. Three records remain with negative values. These have calculations that are mathematically correct. They were therefore left unchanged.
 
-Three records remain with negative values. These have calculations that are mathematically correct. They were therefore left unchanged.
+##### Checking inconsistent prices
+```sql
+-- Initial check for inconsistent prices
+SELECT
+    Item,
+    COUNT(DISTINCT ROUND(Unit_Price, 2)) AS unique_prices,
+    MIN(Unit_Price) AS min_price,
+    MAX(Unit_Price) AS max_price
+FROM silver_sarisari_v4
+WHERE Unit_Price IS NOT NULL
+GROUP BY Item
+ORDER BY unique_prices DESC;
+```
+
+All products exhibited hundreds of unique prices, suggesting that price variation is an expected characteristic of the dataset rather than a data quality issue.
+
+However, invalid values were identified, including negative prices (expected) and the repeated outlier value 895.74346145472623 across multiple unrelated items. The repeated Unit_Price value of 895.74346145472623 was identified across multiple unrelated items, including Bread, Rice, Soft Drinks, Candies, Soy Sauce
+
+```sql
+-- Checking repeated value
+SELECT *
+FROM silver_sarisari_v4
+WHERE Unit_Price < 0
+   OR Unit_Price = 895.74346145472623;
+---Counting affected records
+SELECT
+    COUNT(*) AS records
+FROM silver_sarisari_v4
+WHERE Unit_Price = 895.74346145472623;
+-- Counting recoverable values
+SELECT
+    COUNT(*) AS recoverable
+FROM silver_sarisari_v4
+WHERE Unit_Price = 895.74346145472623
+  AND Quantity IS NOT NULL
+  AND Quantity > 0;
+```
+
+##### Cleaning repeated unit_price
+```sql
+-- Fixing placeholder Unit_Price values
+CREATE OR REPLACE TEMP VIEW silver_sarisari_v5 AS
+SELECT
+    Transaction_ID,
+    Date,
+    Item,
+    Quantity,
+    CASE
+        WHEN Unit_Price = 895.74346145472623
+             AND Quantity IS NOT NULL
+             AND Quantity > 0
+        THEN ROUND(Total_Amount / Quantity, 2)
+
+        WHEN Unit_Price = 895.74346145472623
+             AND (Quantity IS NULL OR Quantity <= 0)
+        THEN NULL
+
+        ELSE Unit_Price
+    END AS Unit_Price,
+    Total_Amount,
+    Payment_Method,
+    Customer_Type
+FROM silver_sarisari_v4;
+
+-- Validation
+SELECT
+    COUNT(*) AS records
+FROM silver_sarisari_v5
+WHERE Unit_Price = 895.74346145472623;
+
+-- Validating all fixes for this column
+SELECT
+    COUNT(*) AS total_records,
+    SUM(CASE WHEN Unit_Price IS NULL THEN 1 ELSE 0 END) AS null_unit_price,
+    SUM(CASE WHEN Unit_Price < 0 THEN 1 ELSE 0 END) AS negative_unit_price,
+    SUM(CASE WHEN Unit_Price = 895.74346145472623 THEN 1 ELSE 0 END) AS placeholder_value,
+    SUM(CASE WHEN Unit_Price = 0 THEN 1 ELSE 0 END) AS zero_unit_price
+FROM silver_sarisari_v5;
+```
+
+##### Results
+| Metric | Count |
+|----------|------:|
+| Total Records | 5,006 |
+| Null Unit_Price | 22 |
+| Negative Unit_Price | 4 |
+| Placeholder Value (895.74346145472623) | 0 |
+| Zero Unit_Price | 0 |
+
+Four records contain negative Unit_Price values. Since the negative values are mathematically consistent with their corresponding Total_Amount values, there is insufficient evidence to determine whether they represent data-entry errors or legitimate reversal/refund transactions. The records were retained and flagged for business review rather than automatically corrected. 
+
+The remaining 22 null values also have insufficient data for us to assume the true value.
 
 ---
 
@@ -429,104 +523,46 @@ Three records remain with negative values. These have calculations that are math
 |---------|---------|
 | Total_Amount | Negative values |
 | Total_Amount | Total amount does not match Unit Price × Quantity |
+
 ##### Checking negative values
 ```sql
 -- Check records where Total_Amount is negative
 SELECT Transaction_ID, Quantity, Unit_Price, Total_Amount
-FROM silver_sarisari_v4
+FROM silver_sarisari_v5
 WHERE Total_Amount < 0
 LIMIT 50;
 ```
 
 Below are the observations from the query result:
+- 49 records have negative Total amount values.
 - Most rows have positive Quantity and Unit_Price, but the Total_Amount is negative.
-- Some rows have negative Unit_Price as well (e.g., Transaction_ID 4645 and 25).
-- A few rows have NULL Quantity or Unit_Price but still a negative total (e.g., 1064, 2314).
-- One row has the known invalid Unit_Price = 895.743... (Transaction_ID 552).
+- Three rows have negative Unit_Price as well (e.g., Transaction_ID 4645, 4739, and 25).
+- Some records have missing `Quantity` values, making validation difficult.
+- One record (Transaction_ID 2314) has both missing `Quantity` and `Unit_Price`, making it unrecoverable.
+- The negative values are mathematically consistent with the transaction details, suggesting possible refunds, returns, reversals, or sign errors.
 
 This tells us there are two root causes for negative totals. First it sign errors (the math is correct but the total is stored as negative). Second is bad inputs (negative or invalid Unit_Price, or missing values).
 
 ##### Cleaning negative values
 ```sql
--- Create v5 with cleaned Total_Amount (fix sign errors, nullify invalid cases)
-CREATE OR REPLACE TEMP VIEW silver_sarisari_v5 AS
-SELECT *,
-       CASE
-         -- Flip sign if math matches but total is negative
-         WHEN Quantity IS NOT NULL 
-              AND Unit_Price IS NOT NULL 
-              AND ROUND(Quantity * Unit_Price, 2) = ABS(ROUND(Total_Amount, 2))
-              AND Total_Amount < 0
-         THEN ABS(Total_Amount)
-
-         -- Nullify invalid cases
-         WHEN Unit_Price < 0 THEN NULL
-         WHEN Quantity IS NULL OR Unit_Price IS NULL THEN NULL
-         WHEN Unit_Price = 895.7434614547262 THEN NULL
-
-         -- Keep valid totals
-         ELSE Total_Amount
-       END AS Total_Amount_cleaned
-FROM silver_sarisari_v4;
-
--- Count remaining negatives after cleaning
-SELECT COUNT(*) AS remaining_negatives
+-- Validation query
+SELECT *
 FROM silver_sarisari_v5
-WHERE Total_Amount_cleaned < 0;
-
+WHERE Total_Amount < 0
+   OR Unit_Price < 0;
 ```
 
-##### Checking mismatched records
-```sql
--- Inspect mismatched records where Quantity × Unit_Price ≠ Total_Amount
-SELECT Transaction_ID, Quantity, Unit_Price, Total_Amount,
-       ROUND(Quantity * Unit_Price, 2) AS expected_total
-FROM silver_sarisari_v5
-WHERE Quantity IS NOT NULL
-  AND Unit_Price IS NOT NULL
-  AND Total_Amount IS NOT NULL
-  AND ROUND(Quantity * Unit_Price, 2) <> ROUND(Total_Amount, 2)
-LIMIT 50;
-```
-##### Cleaning mismatched records
-```sql
--- Correct Quantity mismatches and nullify invalid cases
-CREATE OR REPLACE TEMP VIEW silver_sarisari_v5 AS
-SELECT *,
-       CASE
-         -- Fix Quantity mismatches
-         WHEN Quantity IS NOT NULL
-              AND Unit_Price IS NOT NULL
-              AND Total_Amount IS NOT NULL
-              AND ROUND(Quantity * Unit_Price, 2) <> ROUND(Total_Amount, 2)
-              AND Unit_Price > 0
-              AND Total_Amount > 0
-         THEN ROUND(Total_Amount / Unit_Price, 0)
-
-         -- Nullify invalid cases
-         WHEN Unit_Price = 895.7434614547262 THEN NULL
-         WHEN Total_Amount < 0 THEN NULL
-
-         -- Keep valid quantities
-         ELSE Quantity
-       END AS Quantity_corrected
-FROM silver_sarisari_v5;
--- Count remaining mismatches after correction
-SELECT COUNT(*) AS remaining_mismatches
-FROM silver_sarisari_v5
-WHERE Quantity_corrected IS NOT NULL
-  AND Unit_Price IS NOT NULL
-  AND Total_Amount IS NOT NULL
-  AND ROUND(Quantity_corrected * Unit_Price, 2) <> ROUND(Total_Amount, 2);
-```
 ##### Results
-- Negative totals: All sign errors were corrected (flipped to positive) and invalid cases (negative Unit_Price, missing values, or the known bad constant) were nullified.
 
-- Mismatched records: Quantities were recalculated where possible, and invalid cases were nullified.
+- Most records contain positive `Quantity` and `Unit_Price` values but negative `Total_Amount`.
+- A small number of records contain both negative `Unit_Price` and negative `Total_Amount`.
+- All records remain mathematically consistent based on the relationship:
 
-- Invalid Unit_Price (895.743...): All rows with this constant were nullified to prevent mismatches.
+  Total_Amount = Quantity × Unit_Price
 
-- Validation: The final check confirmed 0 remaining negatives and 0 remaining mismatches.
+Because the dataset does not provide sufficient business context, it was not possible to determine whether these records represent refunds, returns, reversal transactions, or data-entry sign errors.
+
+These records were retained and flagged for review rather than automatically corrected.
 
 ---
 #### Payment_Method
@@ -534,6 +570,7 @@ WHERE Quantity_corrected IS NOT NULL
 |---------|---------|
 | Payment_Method | Typographical errors |
 | Payment_Method | Invalid payment methods |
+
 ##### Checking for typos and erroneous values
 ```sql
 SELECT
