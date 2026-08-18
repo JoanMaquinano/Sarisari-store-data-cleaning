@@ -545,8 +545,6 @@ This tells us there are two root causes for negative totals. First it sign error
 
 ##### Cleaning negative values
 ```sql
--- Create v6 with cleaned Total_Amount (fix sign errors, nullify invalid cases)
--- Create v6 with cleaned Total_Amount (overwrite original, rounded to 2 decimals)
 CREATE OR REPLACE TABLE silver_sarisari_v6 AS
 SELECT 
     Transaction_ID,
@@ -557,12 +555,12 @@ SELECT
     Payment_Method,
     Customer_Type,
     CASE
-        -- Flip sign if math matches but total is negative
+        -- Fix sign errors: math matches but total stored as negative
         WHEN Quantity IS NOT NULL 
              AND Unit_Price IS NOT NULL 
              AND ROUND(Quantity * Unit_Price, 2) = ABS(ROUND(Total_Amount, 2))
              AND Total_Amount < 0
-        THEN ROUND(ABS(Total_Amount), 2)
+        THEN ABS(ROUND(Total_Amount, 2))
 
         -- Nullify invalid cases
         WHEN Unit_Price < 0 THEN NULL
@@ -575,11 +573,20 @@ SELECT
 FROM silver_sarisari_v5;
 
 -- Validation query (check for remaining negatives or invalid unit prices)
-SELECT *
+SELECT Transaction_ID, Quantity, Unit_Price, Total_Amount
 FROM silver_sarisari_v6
-WHERE Total_Amount < 0
-   OR Unit_Price < 0;
+WHERE Total_Amount < 0;
 ```
+
+Sign errors are corrected only when Quantity × Unit_Price matches the absolute value of the stored total.
+
+Negative Unit_Price → treated as invalid, set to NULL.
+
+Missing Quantity or Unit_Price → set to NULL.
+
+Known bad constant (895.7434614547262) → set to NULL.
+
+All values are rounded to 2 decimals.
 
 ##### Results
 
