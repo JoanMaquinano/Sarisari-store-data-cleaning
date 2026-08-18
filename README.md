@@ -531,93 +531,202 @@ SELECT Transaction_ID, Quantity, Unit_Price, Total_Amount
 FROM silver_sarisari_v5
 WHERE Total_Amount < 0
 LIMIT 50;
-```
 
-Below are the observations from the query result:
-- 49 records have negative Total amount values.
-- Most rows have positive Quantity and Unit_Price, but the Total_Amount is negative.
-- Three rows have negative Unit_Price as well (e.g., Transaction_ID 4645, 4739, and 25).
-- Some records have missing `Quantity` values, making validation difficult.
-- One record (Transaction_ID 2314) has both missing `Quantity` and `Unit_Price`, making it unrecoverable.
-- The negative values are mathematically consistent with the transaction details, suggesting possible refunds, returns, reversals, or sign errors.
-
-This tells us there are two root causes for negative totals. First it sign errors (the math is correct but the total is stored as negative). Second is bad inputs (negative or invalid Unit_Price, or missing values).
-
-##### Cleaning negative values
-```sql
+-- Create v6 with issue flags instead of making assumptions
 CREATE OR REPLACE TABLE silver_sarisari_v6 AS
-SELECT 
+SELECT
     Transaction_ID,
     Date,
     Item,
     Quantity,
     Unit_Price,
+    Total_Amount,
     Payment_Method,
     Customer_Type,
+
     CASE
-        -- Fix sign errors: math matches but total stored as negative
-        WHEN Quantity IS NOT NULL 
-             AND Unit_Price IS NOT NULL 
-             AND ROUND(Quantity * Unit_Price, 2) = ABS(ROUND(Total_Amount, 2))
-             AND Total_Amount < 0
-        THEN ABS(ROUND(Total_Amount, 2))
+        WHEN Unit_Price = 895.74346145472623
+            THEN 'Placeholder Unit_Price'
 
-        -- Nullify invalid cases
-        WHEN Unit_Price < 0 THEN NULL
-        WHEN Quantity IS NULL OR Unit_Price IS NULL THEN NULL
-        WHEN Unit_Price = 895.7434614547262 THEN NULL
+        WHEN Unit_Price < 0
+            THEN 'Negative Unit_Price'
 
-        -- Keep valid totals
-        ELSE ROUND(Total_Amount, 2)
-    END AS Total_Amount
+        WHEN Total_Amount < 0
+            THEN 'Negative Total_Amount'
+
+        WHEN Quantity IS NULL
+            THEN 'Missing Quantity'
+
+        WHEN Unit_Price IS NULL
+            THEN 'Missing Unit_Price'
+
+        WHEN Quantity IS NOT NULL
+             AND Unit_Price IS NOT NULL
+             AND Total_Amount IS NOT NULL
+             AND Total_Amount > 0
+             AND Unit_Price > 0
+             AND ROUND(Quantity * Unit_Price, 2) <> ROUND(Total_Amount, 2)
+            THEN 'Amount Mismatch'
+
+        ELSE 'Valid'
+    END AS validation_status
+
 FROM silver_sarisari_v5;
 
--- Validation query (check for remaining negatives or invalid unit prices)
-SELECT Transaction_ID, Quantity, Unit_Price, Total_Amount
+-- Validation
+SELECT
+    validation_status,
+    COUNT(*) AS record_count
 FROM silver_sarisari_v6
-WHERE Total_Amount < 0;
+GROUP BY validation_status
+ORDER BY record_count DESC;
+
+-- Checking valid records
+SELECT *
+FROM silver_sarisari_v6
+WHERE validation_status <> 'Valid';
+
+-- Check recoverable missing values
+SELECT
+    Transaction_ID,
+    Quantity,
+    Unit_Price,
+    Total_Amount,
+    ROUND(Total_Amount / Unit_Price, 0) AS implied_quantity
+FROM silver_sarisari_v6
+WHERE validation_status = 'Amount Mismatch';
+
+-- Quantify implied quantities for mismatching records
+SELECT
+    ROUND(Total_Amount / Unit_Price, 0) AS implied_quantity,
+    COUNT(*) AS record_count
+FROM silver_sarisari_v6
+WHERE validation_status = 'Amount Mismatch'
+GROUP BY ROUND(Total_Amount / Unit_Price, 0)
+ORDER BY implied_quantity;
+
 ```
 
-Sign errors are corrected only when Quantity × Unit_Price matches the absolute value of the stored total.
+| Issue | Count | Assessment |
+|---------|------:|------------|
+| Missing Quantity | 240 | Potentially recoverable |
+| Amount Mismatch | 79 | Investigate further |
+| Negative Total_Amount | 46 | Flag for review |
+| Negative Unit_Price | 4 | Flag for review |
+| Valid | 4,637 | No action needed |
 
-Negative Unit_Price → treated as invalid, set to NULL.
+The validation process identified four primary data quality issues.
+- 240 records contained missing Quantity values. Many appear recoverable using Unit_Price and Total_Amount.
+- 79 records contained mismatches between Quantity, Unit_Price, and Total_Amount, suggesting potential Quantity entry errors.
+- 46 records contained negative Total_Amount values.
+- 4 records contained negative Unit_Price values.
+ 
+Negative transaction values were retained because there was insufficient business context to determine whether they represented refunds, reversals, or data-entry errors. Future cleaning efforts should focus on recovering missing Quantity values and resolving Quantity mismatches where a valid implied quantity can be derived.
 
-Missing Quantity or Unit_Price → set to NULL.
+Of the 79 mismatching records, further investigation showed that all affected records had a recorded Quantity of 2, while the implied quantity calculated as:
+Quantity = Total_Amount ÷ Unit_Price
 
-Known bad constant (895.7434614547262) → set to NULL.
+produced valid whole-number values ranging from 1 to 5.
+This suggests that the mismatch was caused by incorrect Quantity values rather than incorrect Unit_Price or Total_Amount values. Since the implied quantities were valid integers, the records were considered recoverable.
 
-All values are rounded to 2 decimals.
+##### Cleaning negative values
+```sql
+-- Create v7 with corrected Quantity values
+CREATE OR REPLACE TABLE silver_sarisari_v7 AS
+SELECT
+    Transaction_ID,
+    Date,
+    Item,
+
+    CASE
+        WHEN Quantity IS NOT NULL
+             AND Unit_Price IS NOT NULL
+             AND Total_Amount IS NOT NULL
+             AND Total_Amount > 0
+             AND Unit_Price > 0
+             AND ROUND(Quantity * Unit_Price, 2) <> ROUND(Total_Amount, 2)
+        THEN CAST(ROUND(Total_Amount / Unit_Price, 0) AS INT)
+
+        ELSE Quantity
+    END AS Quantity,
+
+    Unit_Price,
+    Total_Amount,
+    Payment_Method,
+    Customer_Type
+FROM silver_sarisari_v6;
+
+-- Confirm no remaining recoverable quantity mismatches
+SELECT COUNT(*) AS remaining_mismatches
+FROM silver_sarisari_v7
+WHERE Quantity IS NOT NULL
+  AND Unit_Price IS NOT NULL
+  AND Total_Amount IS NOT NULL
+  AND Total_Amount > 0
+  AND Unit_Price > 0
+  AND ROUND(Quantity * Unit_Price, 2) <> ROUND(Total_Amount, 2);
+
+-- Create v8 with recovered Quantity values
+CREATE OR REPLACE TABLE silver_sarisari_v8 AS
+SELECT
+    Transaction_ID,
+    Date,
+    Item,
+
+    CASE
+        -- Recover missing Quantity
+        WHEN Quantity IS NULL
+             AND Unit_Price IS NOT NULL
+             AND Total_Amount IS NOT NULL
+             AND Unit_Price > 0
+             AND ROUND(Total_Amount / Unit_Price, 0) =
+                 (Total_Amount / Unit_Price)
+        THEN CAST(ROUND(Total_Amount / Unit_Price, 0) AS INT)
+
+        ELSE Quantity
+    END AS Quantity,
+
+    Unit_Price,
+    Total_Amount,
+    Payment_Method,
+    Customer_Type
+FROM silver_sarisari_v7;
+
+-- Check remaining missing Quantity values
+SELECT
+    COUNT(*) AS remaining_missing_quantity
+FROM silver_sarisari_v8
+WHERE Quantity IS NULL;
+```
+202 can be recovered
 
 ##### Results
 
-Four remaining records contain both negative `Unit_Price` and negative `Total_Amount`. However, all records remain mathematically consistent based on the relationship:
+After cleaning, 202 quantites have been recovered, 79 mismatches were corrected, and 43 were properly documented as unrecoverable based on the relationship:
 
   Total_Amount = Quantity × Unit_Price
 
-Because the dataset does not provide sufficient business context, it was not possible to determine whether these records represent refunds, returns, reversal transactions, or data-entry sign errors.
-
-These records were retained and flagged for review rather than automatically corrected.
+Because the dataset does not provide sufficient business context, it was not possible to determine whether the 43 records represent refunds, returns, reversal transactions, or data-entry sign errors. No unsupported assumptions made about negative transactions. These records were instead retained and flagged for review rather than automatically corrected.
 
 ---
 #### Payment_Method
 | Field | Issue |
 |---------|---------|
 | Payment_Method | Typographical errors |
-| Payment_Method | Invalid payment methods |
 
 ##### Checking for typos and erroneous values
 ```sql
 SELECT
 Payment_Method,
 COUNT(*) AS record_count
-FROM silver_sarisari_v6
+FROM silver_sarisari_v8
 GROUP BY Payment_Method
 ORDER BY Payment_Method;
 ```
 ##### Cleaning typos and erroneous values
 ```sql
 -- Cleaning typos
-CREATE OR REPLACE TEMP VIEW silver_sarisari_v7 AS
+CREATE OR REPLACE TEMP VIEW silver_sarisari_v9 AS
 SELECT
 Transaction_ID,
 Date,
@@ -638,7 +747,7 @@ FROM silver_sarisari_v5;
 SELECT
 Payment_Method,
 COUNT(*) AS record_count
-FROM silver_sarisari_v6
+FROM silver_sarisari_v9
 GROUP BY Payment_Method
 ORDER BY Payment_Method;
 ```
@@ -667,7 +776,7 @@ We have corrected 100 records containing the value `cashh`, standardized all pay
 SELECT
 Customer_Type,
 COUNT(*)
-FROM workspace.d4_indiv.bronze_sarisari
+FROM silver_sarisari_v9
 GROUP BY Customer_Type
 ORDER BY Customer_Type;
 ```
@@ -689,7 +798,7 @@ Additionally, 247 records contained missing (`NULL`) customer type values.
 ##### Cleaning
 
 ```sql
-CREATE OR REPLACE TEMP VIEW silver_sarisari_v6 AS
+CREATE OR REPLACE TEMP VIEW silver_sarisari_v10 AS
 SELECT
 CASE
 WHEN Customer_Type IN ('123', 'Neighbor')
@@ -703,13 +812,13 @@ Quantity,
 Total_Amount,
 Transaction_ID,
 Unit_Price
-FROM workspace.d4_indiv.bronze_sarisari;
+FROM silver_sarisari_v9;
 
 -- Validation
 SELECT
 Customer_Type,
 COUNT(*)
-FROM silver_sarisari
+FROM silver_sarisari_v10
 GROUP BY Customer_Type
 ORDER BY Customer_Type;
 ```
@@ -719,9 +828,9 @@ A `CASE` statement was used to replace the invalid customer types `123` and `Nei
 ##### Results
 After cleaning, the `Customer_Type` column contains only three values:
 
-- `Regular` remains unchanged with **1,547 records**.
-- `Walk-in` remains unchanged with **1,620 records**.
-- `NULL` values increased from **247** to **1,933** records.
+- `Regular` remains unchanged with **1,515 records**.
+- `Walk-in` remains unchanged with **1,600 records**.
+- `NULL` values increased from **247** to **1,891** records.
 
 The increase in NULL values is expected because the invalid customer types `123` (104 records) and `Neighbor` (1,582 records) were converted to NULL.
 
@@ -743,14 +852,14 @@ Before publishing the dataset, a series of validation checks were performed to e
 
 ```sql
 SELECT COUNT(*) AS final_row_count
-FROM silver_sarisari_final;
+FROM silver_sarisari_v10;
 ```
 
 This confirms the final number of records remaining after all cleaning activities.
 ##### Validate Schema
 
 ```sql
-DESCRIBE silver_sarisari_final;
+DESCRIBE silver_sarisari_v10;
 ```
 
 This confirms that all columns are present and stored using the expected data types.
@@ -765,7 +874,7 @@ SELECT
     COUNT(CASE WHEN Unit_Price IS NULL THEN 1 END) AS missing_unit_prices,
     COUNT(CASE WHEN Payment_Method IS NULL THEN 1 END) AS missing_payment_methods,
     COUNT(CASE WHEN Customer_Type IS NULL THEN 1 END) AS missing_customer_types
-FROM silver_sarisari_final;
+FROM silver_sarisari_v10;
 ```
 
 This provides a final summary of remaining missing values that could not be reliably corrected.
@@ -774,7 +883,7 @@ This provides a final summary of remaining missing values that could not be reli
 
 ```sql
 SELECT *
-FROM silver_sarisari_v6
+FROM silver_sarisari_v10
 LIMIT 20;
 ```
 
@@ -787,9 +896,9 @@ A sample review was conducted to verify that cleaning rules were applied correct
 After validation was completed, the cleaned dataset was persisted to the Silver Layer.
 
 ```sql
-CREATE OR REPLACE TABLE d4_indiv.silver_sarisari_final AS
+CREATE OR REPLACE TABLE d4_indiv.silver_sarisari AS
 SELECT *
-FROM silver_sarisari_v6;
+FROM silver_sarisari_v10;
 ```
 
 ---
@@ -798,12 +907,12 @@ FROM silver_sarisari_v6;
 
 ```sql
 SELECT COUNT(*) AS final_record_count
-FROM silver_sarisari_final;
+FROM silver_sarisari;
 ```
 
 ```sql
 SELECT *
-FROM silver_sarisari_final
+FROM silver_sarisari
 LIMIT 20;
 ```
 
@@ -839,4 +948,4 @@ The resulting dataset is cleaner, more consistent, and better suited for reporti
 | Layer | Silver |
 | Purpose | Cleaned and analysis-ready sales dataset |
 | Source | `workspace.d4_indiv.bronze_sarisari` |
-| Final Record Count | 5,005 |
+| Final Record Count | 5,006 |
