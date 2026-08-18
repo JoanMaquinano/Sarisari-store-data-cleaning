@@ -67,12 +67,17 @@ Created a temporary Silver-layer view from the Bronze table. This view serves as
 
 ```sql
 -- Creating temporary silver layer
-CREATE TABLE silver_sarisari AS
+CREATE TEMP TABLE silver_sarisari AS
 SELECT *
 FROM workspace.d4_indiv.bronze_sarisari;
 ```
 
 #### Transaction_ID
+
+| Field | Issue |
+|---------|---------|
+| Transaction_ID | No issues detected |
+
 ##### Checking
 
 ```sql
@@ -94,7 +99,7 @@ SELECT COUNT(*) AS before_count
 FROM workspace.d4_indiv.bronze_sarisari;
 
 -- Remove duplicate records using DISTINCT
-CREATE OR REPLACE TABLE silver_sarisari AS
+CREATE OR REPLACE TEMPORARY TABLE silver_sarisari AS
 SELECT DISTINCT *
 FROM workspace.d4_indiv.bronze_sarisari;
 
@@ -115,6 +120,9 @@ FROM silver_sarisari;
 - Repeated Transaction_ID values with different values associated with transaction reversals or adjustments were retained.
 
 #### Date
+| Field | Issue |
+|---------|---------|
+| Date | No issues detected |
 ##### Checking
 ```sql
 -- Ordering by date
@@ -141,6 +149,9 @@ The following are the observed earliest and latest date on the transactions.
 | 2022-08-21	| 2026-04-03 |
 
 #### Item
+| Field | Issue |
+|---------|---------|
+| Item | Missing values |
 ##### Checking
 ```sql
 -- Checking for missing items
@@ -159,15 +170,6 @@ FROM silver_sarisari
 WHERE Item IS NULL
 OR TRIM(Item) = '';
 
--- Checking if they have a common Unit_Price
-SELECT
-Unit_Price,
-COUNT(*) AS record_count
-FROM silver_sarisari
-WHERE Item IS NULL
-GROUP BY Unit_Price
-ORDER BY record_count DESC;
-
 -- Checking if Unit_Price uniquely identifies an item
 SELECT
 Unit_Price,
@@ -179,19 +181,20 @@ HAVING COUNT(DISTINCT Item) > 1
 ORDER BY distinct_items DESC;
 ```
 
-After checking the identified 250 missing values, it was observed that:
-- Missing items occur across many different Unit_Price values.
-- Some missing items even have a NULL Unit_Price.
-- There is no obvious one-to-one relationship between a missing Item and a specific Unit_Price.
-- Missing Item values cannot be reliably inferred using Unit_Price.
+After checking the identified 250 missing values, it was observed that null Item frequently overlaps with other data quality issues like missing values in columns quantity, unit price, payment method, and customer type. This is a strong sign that null Item is part of broader incomplete records rather than an isolated issue. There is no found pattern from these values so far. Null records also occur across years.
+
 
 ##### Results
 As the missing values cannot be accurately derived, imputing values would introduce assumptions and potentially reduce data quality. 
 
-Since the affected records also represent less than 5% of the dataset and can be retained for analysis,** the missing Item values were retained as NULL.
+Since the affected records also represent less than 5% of the dataset and can be retained for analysis, ** the missing Item values were retained as NULL.
 **
 
 #### Quantity
+| Field | Issue |
+|---------|---------|
+| Quantity | Invalid quantity values |
+| Quantity | Quantities stored as text (e.g., `"two"`) |
 ##### Checking
 ```sql
 -- Checking for unexpected values
@@ -232,14 +235,22 @@ OR Unit_Price <= 0
 ```
 Based on the resulting tables, we can assume that 353 is not a correctly encoded value. We can derive the correct quantity of the "353" data.
 
-We also found **3 exception records** among the 50 rows with `Quantity = 353`. Two has `NULL` Unit_Price values and one contained a negative Unit_Price value. These were addressed before calculating replacement quantities using:
+We also found **3 exception records** among the 50 rows with `Quantity = 353`. Two has `NULL` Unit_Price values and one contained a negative Unit_Price values: 
+
+| Transaction_ID | Date       | Item             | Quantity | Unit_Price | Total_Amount | Payment_Method | Customer_Type |
+|---------------:|------------|------------------|----------|------------|-------------:|---------------|--------------|
+| 3747 | 2023-11-30 | Candies | 353 | NULL | 175.35 | Cash | Regular |
+| 1251 | 2023-01-27 | Canned Sardines | 353 | NULL | 76.83 | Cash | Walk-in |
+| 159 | 2025-01-17 | Soy Sauce | 353 | -50.00 | 170.88 | GCash | Regular |
+
+Because the true unit price could not be determined with confidence, Quantity was set to NULL at this stage and the records were retained for transparency.
+
+The rest of the values with Quantity = 343 was recalculated using:
 
 Quantity = Total_Amount / Unit_Price
 
 ```sql
--- Change 'two' to 2, derive values using the formula for positive values,
--- Enter negative values as NULL
-
+-- Change 'two' to 2, derive values using the formula for positive values, enter negative values as NULL, and recalculate those that can be derived
 CREATE OR REPLACE TEMP VIEW silver_sarisari_v2 AS
 SELECT
 Transaction_ID,
@@ -283,6 +294,11 @@ The text value 'two' was successfully converted to 2, and the invalid quantity v
 | 5 | 905 |
 
 #### Unit_Price
+| Field | Issue |
+|---------|---------|
+| Unit_Price | Missing values |
+| Unit_Price | Negative values |
+| Unit_Price | Different prices for the same item |
 ##### Checking for null values
 ```sql
 -- Check number of null values
@@ -409,6 +425,10 @@ Three records remain with negative values. These have calculations that are math
 ---
 
 #### Total_Amount
+| Field | Issue |
+|---------|---------|
+| Total_Amount | Negative values |
+| Total_Amount | Total amount does not match Unit Price × Quantity |
 ##### Checking negative values
 ```sql
 -- Check records where Total_Amount is negative
@@ -510,6 +530,10 @@ WHERE Quantity_corrected IS NOT NULL
 
 ---
 #### Payment_Method
+| Field | Issue |
+|---------|---------|
+| Payment_Method | Typographical errors |
+| Payment_Method | Invalid payment methods |
 ##### Checking for typos and erroneous values
 ```sql
 SELECT
@@ -564,12 +588,10 @@ ORDER BY Payment_Method;
 ---
 
 #### Customer_Type
-
-##### Issue
-
-- Missing values
-- Invalid customer types
-- Unapproved customer categories
+| Field | Issue |
+|---------|---------|
+| Customer_Type | Invalid customer type values (`123`) |
+| Customer_Type | Unapproved customer category (`Neighbor`) |
 
 ##### Checking values
 
