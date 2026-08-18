@@ -741,7 +741,7 @@ ELSE Payment_Method
 END AS Payment_Method,
 
 Customer_Type
-FROM silver_sarisari_v5;
+FROM silver_sarisari_v8;
 
 -- Validation
 SELECT
@@ -801,7 +801,7 @@ Additionally, 247 records contained missing (`NULL`) customer type values.
 CREATE OR REPLACE TEMP VIEW silver_sarisari_v10 AS
 SELECT
 CASE
-WHEN Customer_Type IN ('123', 'Neighbor')
+WHEN Customer_Type IN ('123')
 THEN NULL
 ELSE Customer_Type
 END AS Customer_Type,
@@ -826,15 +826,18 @@ ORDER BY Customer_Type;
 A `CASE` statement was used to replace the invalid customer types `123` and `Neighbor` with `NULL`, while keeping valid values unchanged.
 
 ##### Results
-After cleaning, the `Customer_Type` column contains only three values:
+After cleaning, the `Customer_Type` column contains these values:
 
-- `Regular` remains unchanged with **1,515 records**.
-- `Walk-in` remains unchanged with **1,600 records**.
-- `NULL` values increased from **247** to **1,891** records.
+| Customer_Type | Count |
+|---------------|------:|
+| NULL | 344 |
+| Neighbor | 1,547 |
+| Regular | 1,515 |
+| Walk-in | 1,600 |
 
-The increase in NULL values is expected because the invalid customer types `123` (104 records) and `Neighbor` (1,582 records) were converted to NULL.
+The increase in NULL values is expected because the invalid customer types `123` (104 records) were converted to NULL.
 
-As a result, all invalid customer type values were successfully removed, leaving only the approved customer categories (`Regular` and `Walk-in`) and records with missing customer type information.
+As a result, all invalid customer type values were successfully removed, leaving only the approved customer categories (`Regular`, `Neighbor`, and `Walk-in`) and records with missing customer type information.
 
 ---
 
@@ -924,27 +927,54 @@ These checks confirm that:
 
 ---
 
-## Final Outcome
+# 4. Conclusion and analysis
+## Data Quality Improvement: Bronze vs Silver
 
-The Silver Layer dataset was successfully created and contains:
+| Metric | Bronze | Silver | Change |
+|----------|------:|------:|------:|
+| Total Records | 5,100 | 5,006 | -94 |
+| Missing Items | 253 | 250 | -3 |
+| Missing Quantities | 246 | 43 | -203 |
+| Missing Unit Prices | 247 | 22 | -225 |
+| Missing Payment Methods | 250 | 246 | -4 |
+| Missing Customer Types | 247 | 344 | +97 |
 
-- Duplicate records removed
-- Invalid quantity valuee corrected where recoverable
-- Missing Unit_Price values recovered where possible
-- Invalid payment meth*ds standardized
-- Invalid customer*type values removed
-- Data quality issues investigated and documented
-- Remaining unresolved records retained for manual review rather than modified through assumptions
+## Analysis
 
-The resulting dataset is cleaner, more consistent, and better suited for reporting, dashboarding, and further analytical work.
+- Total records decreased from **5,100 to 5,006**, indicating that 94 duplicate, invalid, or otherwise removable records were excluded during cleaning.
+- Missing **Quantity** values decreased significantly from **246 to 43**, with 203 records successfully recovered using available transaction information.
+- Missing **Unit_Price** values decreased from **247 to 22**, showing that most missing prices were successfully reconstructed or corrected.
+- Missing **Item** values improved slightly from **253 to 250**, suggesting limited opportunities for reliable recovery.
+- Missing **Payment_Method** values showed minimal improvement, decreasing from **250 to 246**.
+- Missing **Customer_Type** values increased from **247 to 344**. This increase likely resulted from standardizing invalid customer type values (e.g., placeholder or unexpected entries) to `NULL`, improving data consistency at the expense of completeness.
 
----
+## Key Outcomes
+
+✅ Recovered 203 missing Quantity values
+
+✅ Reduced missing Unit_Price values by 225 records
+
+✅ Removed placeholder and invalid Unit_Price values
+
+✅ Corrected 79 Quantity mismatches using mathematically derived quantities
+
+✅ Preserved negative transaction records for review rather than making unsupported assumptions
+
+⚠️ 43 Quantity values remain unrecoverable
+
+⚠️ 22 Unit_Price values remain unrecoverable
+
+⚠️ Customer_Type completeness declined due to standardization of invalid values
+
+## Conclusion
+
+The Silver layer significantly improved data quality by recovering missing values, correcting quantity inconsistencies, and removing invalid pricing records. The largest improvements were observed in the `Quantity` and `Unit_Price` fields, while unresolved records were retained 
 
 ## Final Output
 
 | Attribute | Value |
 |-----------|--------|
-| Table Name | `workspace.d4_indiv.silver_sarisari_final` |
+| Table Name | `workspace.d4_indiv.silver_sarisari` |
 | Layer | Silver |
 | Purpose | Cleaned and analysis-ready sales dataset |
 | Source | `workspace.d4_indiv.bronze_sarisari` |
