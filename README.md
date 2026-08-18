@@ -439,7 +439,7 @@ ORDER BY unique_prices DESC;
 
 All products exhibited hundreds of unique prices, suggesting that price variation is an expected characteristic of the dataset rather than a data quality issue.
 
-However, invalid values were identified, including negative prices (expected) and the repeated outlier value 895.74346145472623 across multiple unrelated items. The repeated Unit_Price value of 895.74346145472623 was identified across multiple unrelated items, including Bread, Rice, Soft Drinks, Candies, Soy Sauce
+However, invalid values were identified, including negative prices and the repeated outlier value 895.74346145472623 across multiple unrelated items. The repeated Unit_Price value of 895.74346145472623 was identified across multiple unrelated items, including Bread, Rice, Soft Drinks, Candies, Soy Sauce
 
 ```sql
 -- Checking repeated value
@@ -545,18 +545,45 @@ This tells us there are two root causes for negative totals. First it sign error
 
 ##### Cleaning negative values
 ```sql
--- Validation query
+-- Create v6 with cleaned Total_Amount (fix sign errors, nullify invalid cases)
+-- Create v6 with cleaned Total_Amount (overwrite original, rounded to 2 decimals)
+CREATE OR REPLACE TABLE silver_sarisari_v6 AS
+SELECT 
+    Transaction_ID,
+    Date,
+    Item,
+    Quantity,
+    Unit_Price,
+    Payment_Method,
+    Customer_Type,
+    CASE
+        -- Flip sign if math matches but total is negative
+        WHEN Quantity IS NOT NULL 
+             AND Unit_Price IS NOT NULL 
+             AND ROUND(Quantity * Unit_Price, 2) = ABS(ROUND(Total_Amount, 2))
+             AND Total_Amount < 0
+        THEN ROUND(ABS(Total_Amount), 2)
+
+        -- Nullify invalid cases
+        WHEN Unit_Price < 0 THEN NULL
+        WHEN Quantity IS NULL OR Unit_Price IS NULL THEN NULL
+        WHEN Unit_Price = 895.7434614547262 THEN NULL
+
+        -- Keep valid totals
+        ELSE ROUND(Total_Amount, 2)
+    END AS Total_Amount
+FROM silver_sarisari_v5;
+
+-- Validation query (check for remaining negatives or invalid unit prices)
 SELECT *
-FROM silver_sarisari_v5
+FROM silver_sarisari_v6
 WHERE Total_Amount < 0
    OR Unit_Price < 0;
 ```
 
 ##### Results
 
-- Most records contain positive `Quantity` and `Unit_Price` values but negative `Total_Amount`.
-- A small number of records contain both negative `Unit_Price` and negative `Total_Amount`.
-- All records remain mathematically consistent based on the relationship:
+Four remaining records contain both negative `Unit_Price` and negative `Total_Amount`. However, all records remain mathematically consistent based on the relationship:
 
   Total_Amount = Quantity × Unit_Price
 
@@ -576,14 +603,14 @@ These records were retained and flagged for review rather than automatically cor
 SELECT
 Payment_Method,
 COUNT(*) AS record_count
-FROM silver_sarisari_v5
+FROM silver_sarisari_v6
 GROUP BY Payment_Method
 ORDER BY Payment_Method;
 ```
 ##### Cleaning typos and erroneous values
 ```sql
 -- Cleaning typos
-CREATE OR REPLACE TEMP VIEW silver_sarisari_v6 AS
+CREATE OR REPLACE TEMP VIEW silver_sarisari_v7 AS
 SELECT
 Transaction_ID,
 Date,
@@ -617,10 +644,7 @@ ORDER BY Payment_Method;
 | PayMaya | 1591 |
 
 ##### Results
-- Corrected 100 records containing the value `cashh`.
-- Standardized all payment method names.
-- Retained missing values as NULL.
-- Payment_Method now contains only valid payment methods.
+We have corrected 100 records containing the value `cashh`, standardized all payment method names, and retained missing values as NULL. Payment_Method now contains only valid payment methods.
 
 ---
 
