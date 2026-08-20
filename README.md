@@ -1,981 +1,440 @@
-# SQL Data Clean-up: Building the Silver Layer of Medallion Architecture on a Dirty Sari-sari store Dataset Using SQL
+# Building a Clean Sari-sari Store Sales Dataset Using SQL and Medallion Architecture
 
 ## 📌 Project Overview
 
-This project focuses on transforming raw sales data into a clean, reliable, and analysis-ready dataset using SQL in Databricks.
+This project demonstrates a Medallion Architecture approach to data quality management using SQL in Databricks.
 
-The workflow follows common data engineering practices used in the Silver Layer of a medallion architecture, where raw data is cleaned, standardized, validated, and prepared for downstream reporting and analytics.
+The workflow is divided into two stages:
 
-## 🎯 Objective
+- Bronze Layer: Data ingestion, profiling, and quality assessment
+- Silver Layer: Data cleaning, standardization, and validation
 
-Create a clean and consistent table called:
+The objective is to identify quality issues in a raw sales dataset and transform it into a reliable dataset for reporting and analytics.
 
-`silver.sarisari_sales`
+---
 
-The final table should contain high-quality data that can be trusted for business analysis and reporting.
+## 🎯 Objectives
+
+### Bronze Layer
+
+Assess the quality of the raw dataset by identifying:
+
+- Missing values
+- Invalid values
+- Duplicate records
+- Inconsistent formats
+- Data type issues
+- Business rule violations
+
+### Silver Layer
+
+Transform the raw dataset into a clean and analysis-ready table by:
+
+- Correcting recoverable data quality issues
+- Standardizing formats and text values
+- Applying business validation rules
+- Converting columns to appropriate data types
+- Producing a trusted analytical dataset
+
+---
 
 ## ✅ Expected Outcome
 
-A dataset that is:
-
-- Complete and reliable
-- Free of major data quality issues
-- Consistent in formatting
-- Stored using proper data types
-- Free of unnecessary duplicates
-- Ready for analysis and reporting
+A clean and reliable dataset suitable for reporting, analytics, and downstream data processing.
 
 ---
 
 # Project Workflow
 
-## 1. Inspect the Raw Data for Quality Problems
+## Data Architecture
 
-### Goal
-
-Identify data quality issues that may affect reporting, analysis, and downstream transformations through manual checking in Excel.
-
-### Findings
-
-| Field | Issue |
-|---------|---------|
-| Transaction_ID | No issues detected |
-| Date | No issues detected |
-| Item | Missing values |
-| Quantity | Invalid quantity values |
-| Quantity | Quantities stored as text (e.g., `"two"`) |
-| Unit_Price | Missing values |
-| Unit_Price | Negative values |
-| Unit_Price | Different prices for the same item |
-| Total_Amount | Negative values |
-| Total_Amount | Total amount does not match Unit Price × Quantity |
-| Payment_Method | Typographical errors |
-| Payment_Method | Invalid payment methods |
-| Customer_Type | Missing values |
-| Customer_Type | Invalid customer type values (`123`) |
-| Customer_Type | Unapproved customer category (`Neighbor`) |
-
-## 2. Fix Values by Column
-
-### Goal
-
-Correct incomplete, invalid, and inaccurate data identified during the data profiling phase to improve overall data quality and reliability.
-
-#### Create Silver Layer
-
-Created a temporary Silver-layer view from the Bronze table. This view serves as the working dataset for all subsequent cleaning and validation activities while preserving the original Bronze data.
-
-```sql
--- Creating temporary silver layer
-CREATE TEMP TABLE silver_sarisari AS
-SELECT *
-FROM workspace.d4_indiv.bronze_sarisari;
+```text
+workspace.d4_indiv.bronze_sarisari
+                ↓
+workspace.sari_sari_pipeline.sari_sari_transactions_raw
+                ↓
+Data Profiling & Quality Assessment
+                ↓
+Data Cleaning & Standardization
+                ↓
+workspace.sari_sari_pipeline.sari_sari_transactions_clean
 ```
 
-#### Transaction_ID
-
-| Field | Issue |
-|---------|---------|
-| Transaction_ID | No issues detected |
-
-##### Checking
-
-```sql
--- Checking for duplicate entries
-SELECT
-Transaction_ID,
-COUNT(*) AS record_count
-FROM silver_sarisari
-GROUP BY Transaction_ID
-HAVING COUNT(*) > 1;
+```text
+Bronze Layer
+│
+├── Raw Data Ingestion
+├── Data Profiling
+├── Data Quality Assessment
+└── Issue Identification
+            ↓
+Silver Layer
+│
+├── Data Cleaning
+├── Data Standardization
+├── Business Validation
+└── Final Clean Dataset
 ```
 
-Identified 100 repeated `Transaction_ID` values. Review of sample records showed that many of the duplicated rows were exact copies across all columns and could be removed through deduplication.
+---
 
-##### Cleaning (Removing duplicates)
-```sql
--- Before cleaning
-SELECT COUNT(*) AS before_count
-FROM workspace.d4_indiv.bronze_sarisari;
+# 1. Bronze Layer: Data Quality Assessment
 
--- Remove duplicate records using DISTINCT
-CREATE OR REPLACE TEMPORARY TABLE silver_sarisari AS
-SELECT DISTINCT *
-FROM workspace.d4_indiv.bronze_sarisari;
+## Goal
 
--- After cleaning
-SELECT COUNT(*) AS after_count
-FROM silver_sarisari;
+Explore the raw dataset and identify data quality issues before any transformations are applied.
+
+### Input Table
+
+`workspace.sari_sari_pipeline.sari_sari_transactions_raw`
+
+### Dataset Overview
+
+| Dataset | Description |
+|----------|-------------|
+| Sari-sari Store Sales | Transaction-level sales records containing item purchases, quantities, prices, payment methods, and customer information |
+
+---
+
+## Data Profiling Results
+
+### Duplicate Records
+
+| Finding | Result |
+|----------|---------|
+| Duplicate Transaction_ID values detected | Yes |
+| Exact duplicate rows identified | Yes |
+
+A review of duplicate Transaction_ID values showed that many duplicated rows were exact copies across all columns.
+
+---
+
+### Date
+
+| Finding | Result |
+|----------|---------|
+| Mixed date formats | No |
+| Invalid dates detected | No |
+
+| Metric | Value |
+|----------|----------|
+| Earliest Transaction Date | 2022-08-21 |
+| Latest Transaction Date | 2026-04-03 |
+
+---
+
+### Item
+
+| Finding | Count |
+|----------|------:|
+| Missing Item values | 250 |
+
+Missing Item values frequently occurred alongside missing Quantity, Unit_Price, Payment_Method, and Customer_Type values.
+
+No reliable pattern was found for imputation.
+
+---
+
+### Quantity
+
+| Finding | Count |
+|----------|------:|
+| Missing values | 242 |
+| Invalid value (`353`) | 50 |
+| Text value (`two`) | 100 |
+
+The repeated value `353` appeared inconsistent with expected transaction behavior and was investigated further.
+
+---
+
+### Unit_Price
+
+| Finding | Count |
+|----------|------:|
+| Missing values | 242 |
+| Negative values | 50 |
+| Placeholder values detected | 47 |
+
+A repeated Unit_Price value of:
+
+```text
+895.74346145472623
 ```
 
-##### Results
+appeared across multiple unrelated products and was treated as a placeholder value.
 
-| Metric | Count |
-|---------|------:|
-| Before Cleaning | 5,100 |
-| After Cleaning | 5,006 |
+---
 
-- Removed 94 exact duplicate records.
-- Retained one copy of each duplicated record.
-- Repeated Transaction_ID values with different values associated with transaction reversals or adjustments were retained.
+### Total_Amount
 
-#### Date
-| Field | Issue |
-|---------|---------|
-| Date | No issues detected |
-##### Checking
-```sql
--- Ordering by date
-SELECT DISTINCT Date
-FROM silver_sarisari
-ORDER BY Date;
--- Checking for differently formatted dates
-SELECT Date
-FROM silver_sarisari
-WHERE Date LIKE '%/%';
--- Optional analysis to check scope of transactions
-SELECT 
-    MIN(Date) AS earliest_date,
-    MAX(Date) AS latest_date
-FROM silver_sarisari;
+| Finding | Count |
+|----------|------:|
+| Negative values | 46 |
+| Amount mismatches | 79 |
+
+Validation using:
+
+```text
+Total_Amount = Quantity × Unit_Price
 ```
 
-##### Results
-Through this, it was confirmed that all dates were stored in the `YYYY-MM-DD` format, no inconsistent date formats were identified, and no invalid date values were observed.
+identified records where transaction totals did not match expected amounts.
 
-The following are the observed earliest and latest date on the transactions.
-| earliest_date | latest_date |
-|----------------|------------:|
-| 2022-08-21	| 2026-04-03 |
+---
 
-#### Item
-| Field | Issue |
-|---------|---------|
-| Item | Missing values |
-##### Checking
-```sql
--- Checking for missing items
-SELECT COUNT(*) AS missing_items
-FROM silver_sarisari
-WHERE Item IS NULL
-OR TRIM(Item) = '';
+### Payment_Method
+
+| Finding | Result |
+|----------|---------|
+| Typographical errors detected | Yes |
+
+Example:
+
+```text
+cashh
 ```
 
-From here, we confirmed there are 250 missing Item values.
+---
 
-```sql
--- Checking for patterns in null values
-SELECT *
-FROM silver_sarisari
-WHERE Item IS NULL
-OR TRIM(Item) = '';
+### Customer_Type
 
--- Checking if Unit_Price uniquely identifies an item
-SELECT
-Unit_Price,
-COUNT(DISTINCT Item) AS distinct_items
-FROM silver_sarisari
-WHERE Item IS NOT NULL
-GROUP BY Unit_Price
-HAVING COUNT(DISTINCT Item) > 1
-ORDER BY distinct_items DESC;
+| Finding | Result |
+|----------|---------|
+| Invalid category values detected | Yes |
+
+Invalid values identified:
+
+```text
+123
 ```
 
-After checking the identified 250 missing values, it was observed that null Item frequently overlaps with other data quality issues like missing values in columns quantity, unit price, payment method, and customer type. This is a strong sign that null Item is part of broader incomplete records rather than an isolated issue. There is no found pattern from these values so far. Null records also occur across years.
+Observed categories:
 
+- Walk-in
+- Regular
+- Neighbor
+- 123
+- NULL
 
-##### Results
-As the missing values cannot be accurately derived, imputing values would introduce assumptions and potentially reduce data quality. 
+---
 
-Since the affected records also represent less than 5% of the dataset and can be retained for analysis, ** the missing Item values were retained as NULL.
-**
+## Bronze Layer Summary
 
-#### Quantity
-| Field | Issue |
-|---------|---------|
-| Quantity | Invalid quantity values |
-| Quantity | Quantities stored as text (e.g., `"two"`) |
-##### Checking
-```sql
--- Checking for unexpected values
-SELECT
-Quantity,
-COUNT(*) AS record_count
-FROM silver_sarisari
-GROUP BY Quantity
-ORDER BY Quantity;
+The data quality assessment identified several issues requiring remediation:
+
+- Exact duplicate records
+- Missing values
+- Invalid quantity values
+- Placeholder prices
+- Negative transaction values
+- Calculation inconsistencies
+- Typographical errors
+- Invalid category values
+
+These findings informed the cleaning rules implemented in the Silver Layer.
+
+---
+
+# 2. Silver Layer: Data Cleaning and Standardization
+
+## Goal
+
+Apply cleaning rules and standardization logic to create a trusted dataset for analytics.
+
+### Output Table
+
+`workspace.sari_sari_pipeline.sari_sari_transactions_clean`
+
+---
+
+## Cleaning Actions Performed
+
+### Duplicate Records
+
+- Removed exact duplicate records using `DISTINCT`
+- Retained valid repeated Transaction_ID values
+
+**Result:** 94 duplicate records removed.
+
+---
+
+### Quantity
+
+Applied the following corrections:
+
+- Converted `two` to `2`
+- Corrected invalid `353` values when recoverable
+- Recovered missing quantities using:
+
+```text
+Quantity = Total_Amount ÷ Unit_Price
 ```
 
-This query yields the following values:
-| Quantity | record_count |
-|----------|--------------|
-| null     | 242          |
-| 1        | 899          |
-| 2        | 975          |
-| 3        | 919          |
-| 353      | 50           |
-| 4        | 925          |
-| 5        | 896          |
-| two      | 100          |
+**Results**
 
-##### Cleaning erroneous values
-```sql
--- Checking the 353 values
-SELECT *
-FROM silver_sarisari
-WHERE Quantity = '353';
--- Analyzing NULL and negative Unit_Price values under the 353 quantities
-SELECT *
-FROM silver_sarisari
-WHERE Quantity = '353'
-AND (
-Unit_Price IS NULL
-OR Unit_Price <= 0
-);
-```
-Based on the resulting tables, we can assume that 353 is not a correctly encoded value. We can derive the correct quantity of the "353" data.
-
-We also found **3 exception records** among the 50 rows with `Quantity = 353`. Two has `NULL` Unit_Price values and one contained a negative Unit_Price values: 
-
-| Transaction_ID | Date       | Item             | Quantity | Unit_Price | Total_Amount | Payment_Method | Customer_Type |
-|---------------:|------------|------------------|----------|------------|-------------:|---------------|--------------|
-| 3747 | 2023-11-30 | Candies | 353 | NULL | 175.35 | Cash | Regular |
-| 1251 | 2023-01-27 | Canned Sardines | 353 | NULL | 76.83 | Cash | Walk-in |
-| 159 | 2025-01-17 | Soy Sauce | 353 | -50.00 | 170.88 | GCash | Regular |
-
-Because the true unit price could not be determined with confidence, Quantity was set to NULL at this stage and the records were retained for transparency.
-
-The rest of the values with Quantity = 343 was recalculated using:
-
-Quantity = Total_Amount / Unit_Price
-
-```sql
--- Change 'two' to 2, derive values using the formula for positive values, enter negative values as NULL, and recalculate those that can be derived
-CREATE OR REPLACE TEMP VIEW silver_sarisari_v2 AS
-SELECT
-Transaction_ID,
-Date,
-Item,
-
-CASE
-WHEN Quantity = 'two' THEN 2
-WHEN Quantity = '353' AND Unit_Price > 0
-THEN ROUND(Total_Amount / Unit_Price)
-WHEN Quantity = '353'
-AND (Unit_Price IS NULL OR Unit_Price <= 0)
-THEN NULL
-ELSE Quantity
-END AS Quantity,
-
-Unit_Price,
-Total_Amount,
-Payment_Method,
-Customer_Type
-FROM silver_sarisari;
-
-SELECT
-Quantity,
-COUNT(*) AS record_count
-FROM silver_sarisari_v2
-GROUP BY Quantity
-ORDER BY Quantity;
-
--- Validating results
-SELECT
-Quantity,
-COUNT(*) AS record_count
-FROM silver_sarisari_v2
-GROUP BY Quantity
-ORDER BY Quantity;
-```
-
-##### Results
-The text value 'two' was successfully converted to 2, and the invalid quantity value 353 was replaced using the calculated quantity (Total_Amount / Unit_Price) where possible. Three records with Quantity = 353 could not be corrected because Unit_Price was either NULL or negative, so these were set to NULL. As a result, the number of missing quantities increased slightly from 242 to 245. The dataset now contains only valid quantity values ranging from 1 to 5, along with NULL where correction was not possible.
-
-| Quantity | Record Count |
-|----------|------------:|
-| NULL | 245 |
-| 1 | 905 |
-| 2 | 1082 |
-| 3 | 932 |
-| 4 | 937 |
-| 5 | 905 |
-
-#### Unit_Price
-| Field | Issue |
-|---------|---------|
-| Unit_Price | Missing values |
-| Unit_Price | Negative values |
-| Unit_Price | Different prices for the same item |
-##### Checking for null values
-```sql
--- Check number of null values
-SELECT COUNT(*) AS missing_unit_price
-FROM silver_sarisari_v2
-WHERE Unit_Price IS NULL;
-
--- Check for recoverable missing Unit_Price
-SELECT COUNT(*) AS recoverable
-FROM silver_sarisari_v2
-WHERE Unit_Price IS NULL
-  AND Quantity IS NOT NULL
-  AND Quantity > 0;
-```
-There are 242 starting null values, 230 of which can be recovered.
-
-##### Cleaning by correcting recoverable prices
-```sql
--- Correct recoverable prices
-CREATE OR REPLACE TEMP VIEW silver_sarisari_v3 AS
-SELECT
-Transaction_ID,
-Date,
-Item,
-Quantity,
-
-CASE
- WHEN Unit_Price IS NULL
- AND Quantity IS NOT NULL
- AND Quantity > 0
- THEN ROUND(Total_Amount / Quantity, 2)
-
-ELSE Unit_Price
-END AS Unit_Price,
-
-Total_Amount,
-Payment_Method,
-Customer_Type
-FROM silver_sarisari_v2;
-
--- Validate remaining missing Unit_Price values
-SELECT COUNT(*) AS missing_unit_price_after_cleaning
-FROM silver_sarisari_v3
-WHERE Unit_Price IS NULL;
-```
-
-##### Results
-We were able to correct the 230 null values that had unit prices that can be derived by using the formula:
-Unit_Price = Total_Amount ÷ Quantity
-
-Twelve null values remain which does not contain enough data to be corrected.
-
-##### Checking negative values
-```sql
--- Check negative values
-SELECT *
-FROM silver_sarisari_v3
-WHERE Unit_Price < 0;
-```
-
-There are 50 negative values under unit price.
-
-##### Cleaning negative values
-```sql
--- Deal with the recoverable values
-CREATE OR REPLACE TEMP VIEW silver_sarisari_v4 AS
-SELECT
-Transaction_ID, Date,
-Item,
-Quantity,
-
-CASE
-WHEN Unit_Price < 0
-AND Quantity IS NOT NULL
-AND Quantity > 0
-THEN ROUND(Total_Amount / Quantity, 2)
-
-WHEN Unit_Price < 0
-AND (Quantity IS NULL OR Quantity <= 0)
-THEN NULL
-
-ELSE Unit_Price
-END AS Unit_Price,
-
-Total_Amount,
-Payment_Method,
-Customer_Type
-FROM silver_sarisari_v3;
-
--- Check results
-SELECT COUNT(*) AS negative_unit_price
-FROM silver_sarisari_v4
-WHERE Unit_Price < 0;
-```
-
-Three values remain unchanged.
-
-```sql
--- Check the remaining negative values
-SELECT
-    Quantity,
-    Unit_Price,
-    Total_Amount,
-    ROUND(Total_Amount / Quantity, 2) AS expected_unit_price
-FROM silver_sarisari_v4
-WHERE Unit_Price < 0;
-```
-
-Formula used to derive unit prices:
-
-Unit_Price = Total_Amount ÷ Quantity
-
-
-##### Results
-We were able to correct the 50 negative values that had unit prices that can be derived. Three records remain with negative values. These have calculations that are mathematically correct. They were therefore left unchanged.
-
-##### Checking inconsistent prices
-```sql
--- Initial check for inconsistent prices
-SELECT
-    Item,
-    COUNT(DISTINCT ROUND(Unit_Price, 2)) AS unique_prices,
-    MIN(Unit_Price) AS min_price,
-    MAX(Unit_Price) AS max_price
-FROM silver_sarisari_v4
-WHERE Unit_Price IS NOT NULL
-GROUP BY Item
-ORDER BY unique_prices DESC;
-```
-
-All products exhibited hundreds of unique prices, suggesting that price variation is an expected characteristic of the dataset rather than a data quality issue.
-
-However, invalid values were identified, including negative prices and the repeated outlier value 895.74346145472623 across multiple unrelated items. The repeated Unit_Price value of 895.74346145472623 was identified across multiple unrelated items, including Bread, Rice, Soft Drinks, Candies, Soy Sauce
-
-```sql
--- Checking repeated value
-SELECT *
-FROM silver_sarisari_v4
-WHERE Unit_Price < 0
-   OR Unit_Price = 895.74346145472623;
----Counting affected records
-SELECT
-    COUNT(*) AS records
-FROM silver_sarisari_v4
-WHERE Unit_Price = 895.74346145472623;
--- Counting recoverable values
-SELECT
-    COUNT(*) AS recoverable
-FROM silver_sarisari_v4
-WHERE Unit_Price = 895.74346145472623
-  AND Quantity IS NOT NULL
-  AND Quantity > 0;
-```
-
-##### Cleaning repeated unit_price
-```sql
--- Fixing placeholder Unit_Price values
-CREATE OR REPLACE TEMP VIEW silver_sarisari_v5 AS
-SELECT
-    Transaction_ID,
-    Date,
-    Item,
-    Quantity,
-    CASE
-        WHEN Unit_Price = 895.74346145472623
-             AND Quantity IS NOT NULL
-             AND Quantity > 0
-        THEN ROUND(Total_Amount / Quantity, 2)
-
-        WHEN Unit_Price = 895.74346145472623
-             AND (Quantity IS NULL OR Quantity <= 0)
-        THEN NULL
-
-        ELSE Unit_Price
-    END AS Unit_Price,
-    Total_Amount,
-    Payment_Method,
-    Customer_Type
-FROM silver_sarisari_v4;
-
--- Validation
-SELECT
-    COUNT(*) AS records
-FROM silver_sarisari_v5
-WHERE Unit_Price = 895.74346145472623;
-
--- Validating all fixes for this column
-SELECT
-    COUNT(*) AS total_records,
-    SUM(CASE WHEN Unit_Price IS NULL THEN 1 ELSE 0 END) AS null_unit_price,
-    SUM(CASE WHEN Unit_Price < 0 THEN 1 ELSE 0 END) AS negative_unit_price,
-    SUM(CASE WHEN Unit_Price = 895.74346145472623 THEN 1 ELSE 0 END) AS placeholder_value,
-    SUM(CASE WHEN Unit_Price = 0 THEN 1 ELSE 0 END) AS zero_unit_price
-FROM silver_sarisari_v5;
-```
-
-##### Results
 | Metric | Count |
 |----------|------:|
+| Quantity Mismatches Corrected | 79 |
+| Missing Quantities Recovered | 202 |
+| Remaining Missing Quantities | 43 |
+
+---
+
+### Unit_Price
+
+Applied the following corrections:
+
+- Recovered missing values
+- Corrected recoverable negative values
+- Removed placeholder prices
+- Retained unrecoverable records
+
+**Results**
+
+| Metric | Count |
+|----------|------:|
+| Missing Unit Prices Recovered | 230 |
+| Remaining NULL Unit_Price | 22 |
+| Remaining Negative Unit_Price | 4 |
+| Placeholder Values Remaining | 0 |
+
+---
+
+### Payment_Method
+
+Standardized:
+
+```text
+cashh → Cash
+```
+
+**Result:** All valid payment methods were standardized.
+
+---
+
+### Customer_Type
+
+Converted invalid values:
+
+```text
+123 → NULL
+```
+
+Valid categories were retained.
+
+**Result:** 104 invalid Customer_Type values removed.
+
+---
+
+### Data Type Standardization
+
+To improve consistency and support downstream analytics, key columns were converted to appropriate data types.
+
+| Column | Data Type |
+|----------|-----------|
+| Transaction_ID | INT |
+| Date | DATE |
+| Quantity | INT |
+| Unit_Price | DECIMAL(10,2) |
+| Total_Amount | DECIMAL(10,2) |
+
+This ensures calculations, aggregations, filtering, and reporting can be performed reliably.
+
+---
+
+## Silver Layer Summary
+
+### Cleaning Results
+
+| Check | Result |
+|---------|------:|
+| Duplicate Records Removed | 94 |
+| Quantity Values Recovered | 202 |
+| Quantity Mismatches Corrected | 79 |
+| Missing Unit Prices Recovered | 230 |
+| Placeholder Unit Prices Removed | 47 |
+| Invalid Customer Types Removed | 104 |
+
+### Final Outcome
+
+The Silver-layer dataset:
+
+- Contains deduplicated records
+- Uses standardized categorical values
+- Corrects recoverable data quality issues
+- Retains unresolved records where insufficient evidence exists
+- Preserves data lineage by avoiding unsupported assumptions
+- Is ready for reporting and downstream analytics
+
+---
+
+# 3. Silver Layer Validation
+
+## Goal
+
+Verify that all cleaning rules were applied successfully and confirm that the resulting dataset is suitable for reporting and analysis.
+
+### Validation Checks
+
+The final validation process focused on:
+
+- Record counts
+- Schema and data type validation
+- Remaining missing values
+- Remaining negative values
+- Sample record review
+
+### Validation Results
+
+| Metric | Value |
+|----------|------:|
 | Total Records | 5,006 |
-| Null Unit_Price | 22 |
-| Negative Unit_Price | 4 |
-| Placeholder Value (895.74346145472623) | 0 |
-| Zero Unit_Price | 0 |
+| Missing Items | 250 |
+| Missing Quantities | 43 |
+| Missing Unit Prices | 22 |
+| Missing Payment Methods | 246 |
+| Missing Customer Types | 344 |
 
-Four records contain negative Unit_Price values. Since the negative values are mathematically consistent with their corresponding Total_Amount values, there is insufficient evidence to determine whether they represent data-entry errors or legitimate reversal/refund transactions. The records were retained and flagged for business review rather than automatically corrected. 
+### Data Quality Review
 
-The remaining 22 null values also have insufficient data for us to assume the true value.
+The majority of critical data quality issues identified during profiling were successfully resolved.
 
----
+Remaining missing values were retained only when there was insufficient evidence to derive a reliable replacement value.
 
-#### Total_Amount
-| Field | Issue |
-|---------|---------|
-| Total_Amount | Negative values |
-| Total_Amount | Total amount does not match Unit Price × Quantity |
+No unsupported assumptions were used during the cleaning process.
 
-##### Checking negative values
-```sql
--- Check records where Total_Amount is negative
-SELECT Transaction_ID, Quantity, Unit_Price, Total_Amount
-FROM silver_sarisari_v5
-WHERE Total_Amount < 0
-LIMIT 50;
+### Final Output
 
--- Create v6 with issue flags instead of making assumptions
-CREATE OR REPLACE TABLE silver_sarisari_v6 AS
-SELECT
-    Transaction_ID,
-    Date,
-    Item,
-    Quantity,
-    Unit_Price,
-    Total_Amount,
-    Payment_Method,
-    Customer_Type,
+The validated dataset was published as:
 
-    CASE
-        WHEN Unit_Price = 895.74346145472623
-            THEN 'Placeholder Unit_Price'
+`workspace.sari_sari_pipeline.sari_sari_transactions_clean`
 
-        WHEN Unit_Price < 0
-            THEN 'Negative Unit_Price'
-
-        WHEN Total_Amount < 0
-            THEN 'Negative Total_Amount'
-
-        WHEN Quantity IS NULL
-            THEN 'Missing Quantity'
-
-        WHEN Unit_Price IS NULL
-            THEN 'Missing Unit_Price'
-
-        WHEN Quantity IS NOT NULL
-             AND Unit_Price IS NOT NULL
-             AND Total_Amount IS NOT NULL
-             AND Total_Amount > 0
-             AND Unit_Price > 0
-             AND ROUND(Quantity * Unit_Price, 2) <> ROUND(Total_Amount, 2)
-            THEN 'Amount Mismatch'
-
-        ELSE 'Valid'
-    END AS validation_status
-
-FROM silver_sarisari_v5;
-
--- Validation
-SELECT
-    validation_status,
-    COUNT(*) AS record_count
-FROM silver_sarisari_v6
-GROUP BY validation_status
-ORDER BY record_count DESC;
-
--- Checking valid records
-SELECT *
-FROM silver_sarisari_v6
-WHERE validation_status <> 'Valid';
-
--- Check recoverable missing values
-SELECT
-    Transaction_ID,
-    Quantity,
-    Unit_Price,
-    Total_Amount,
-    ROUND(Total_Amount / Unit_Price, 0) AS implied_quantity
-FROM silver_sarisari_v6
-WHERE validation_status = 'Amount Mismatch';
-
--- Quantify implied quantities for mismatching records
-SELECT
-    ROUND(Total_Amount / Unit_Price, 0) AS implied_quantity,
-    COUNT(*) AS record_count
-FROM silver_sarisari_v6
-WHERE validation_status = 'Amount Mismatch'
-GROUP BY ROUND(Total_Amount / Unit_Price, 0)
-ORDER BY implied_quantity;
-
-```
-
-| Issue | Count | Assessment |
-|---------|------:|------------|
-| Missing Quantity | 240 | Potentially recoverable |
-| Amount Mismatch | 79 | Investigate further |
-| Negative Total_Amount | 46 | Flag for review |
-| Negative Unit_Price | 4 | Flag for review |
-| Valid | 4,637 | No action needed |
-
-The validation process identified four primary data quality issues.
-- 240 records contained missing Quantity values. Many appear recoverable using Unit_Price and Total_Amount.
-- 79 records contained mismatches between Quantity, Unit_Price, and Total_Amount, suggesting potential Quantity entry errors.
-- 46 records contained negative Total_Amount values.
-- 4 records contained negative Unit_Price values.
- 
-Negative transaction values were retained because there was insufficient business context to determine whether they represented refunds, reversals, or data-entry errors. Future cleaning efforts should focus on recovering missing Quantity values and resolving Quantity mismatches where a valid implied quantity can be derived.
-
-Of the 79 mismatching records, further investigation showed that all affected records had a recorded Quantity of 2, while the implied quantity calculated as:
-Quantity = Total_Amount ÷ Unit_Price
-
-produced valid whole-number values ranging from 1 to 5.
-This suggests that the mismatch was caused by incorrect Quantity values rather than incorrect Unit_Price or Total_Amount values. Since the implied quantities were valid integers, the records were considered recoverable.
-
-##### Cleaning negative values
-```sql
--- Create v7 with corrected Quantity values
-CREATE OR REPLACE TABLE silver_sarisari_v7 AS
-SELECT
-    Transaction_ID,
-    Date,
-    Item,
-
-    CASE
-        WHEN Quantity IS NOT NULL
-             AND Unit_Price IS NOT NULL
-             AND Total_Amount IS NOT NULL
-             AND Total_Amount > 0
-             AND Unit_Price > 0
-             AND ROUND(Quantity * Unit_Price, 2) <> ROUND(Total_Amount, 2)
-        THEN CAST(ROUND(Total_Amount / Unit_Price, 0) AS INT)
-
-        ELSE Quantity
-    END AS Quantity,
-
-    Unit_Price,
-    Total_Amount,
-    Payment_Method,
-    Customer_Type
-FROM silver_sarisari_v6;
-
--- Confirm no remaining recoverable quantity mismatches
-SELECT COUNT(*) AS remaining_mismatches
-FROM silver_sarisari_v7
-WHERE Quantity IS NOT NULL
-  AND Unit_Price IS NOT NULL
-  AND Total_Amount IS NOT NULL
-  AND Total_Amount > 0
-  AND Unit_Price > 0
-  AND ROUND(Quantity * Unit_Price, 2) <> ROUND(Total_Amount, 2);
-
--- Create v8 with recovered Quantity values
-CREATE OR REPLACE TABLE silver_sarisari_v8 AS
-SELECT
-    Transaction_ID,
-    Date,
-    Item,
-
-    CASE
-        -- Recover missing Quantity
-        WHEN Quantity IS NULL
-             AND Unit_Price IS NOT NULL
-             AND Total_Amount IS NOT NULL
-             AND Unit_Price > 0
-             AND ROUND(Total_Amount / Unit_Price, 0) =
-                 (Total_Amount / Unit_Price)
-        THEN CAST(ROUND(Total_Amount / Unit_Price, 0) AS INT)
-
-        ELSE Quantity
-    END AS Quantity,
-
-    Unit_Price,
-    Total_Amount,
-    Payment_Method,
-    Customer_Type
-FROM silver_sarisari_v7;
-
--- Check remaining missing Quantity values
-SELECT
-    COUNT(*) AS remaining_missing_quantity
-FROM silver_sarisari_v8
-WHERE Quantity IS NULL;
-```
-202 can be recovered
-
-##### Results
-
-After cleaning, 202 quantites have been recovered, 79 mismatches were corrected, and 43 were properly documented as unrecoverable based on the relationship:
-
-  Total_Amount = Quantity × Unit_Price
-
-Because the dataset does not provide sufficient business context, it was not possible to determine whether the 43 records represent refunds, returns, reversal transactions, or data-entry sign errors. No unsupported assumptions made about negative transactions. These records were instead retained and flagged for review rather than automatically corrected.
+This table serves as the trusted Silver-layer dataset for reporting, analytics, and downstream data processing.
 
 ---
-#### Payment_Method
-| Field | Issue |
-|---------|---------|
-| Payment_Method | Typographical errors |
-
-##### Checking for typos and erroneous values
-```sql
-SELECT
-Payment_Method,
-COUNT(*) AS record_count
-FROM silver_sarisari_v8
-GROUP BY Payment_Method
-ORDER BY Payment_Method;
-```
-##### Cleaning typos and erroneous values
-```sql
--- Cleaning typos
-CREATE OR REPLACE TEMP VIEW silver_sarisari_v9 AS
-SELECT
-Transaction_ID,
-Date,
-Item,
-Quantity,
-Unit_Price,
-Total_Amount,
-
-CASE
-WHEN Payment_Method = 'cashh' THEN 'Cash'
-ELSE Payment_Method
-END AS Payment_Method,
-
-Customer_Type
-FROM silver_sarisari_v8;
-
--- Validation
-SELECT
-Payment_Method,
-COUNT(*) AS record_count
-FROM silver_sarisari_v9
-GROUP BY Payment_Method
-ORDER BY Payment_Method;
-```
-
-| Payment_Method | Record Count |
-|----------------|------------:|
-| NULL | 246 |
-| Cash | 1635 |
-| GCash | 1534 |
-| PayMaya | 1591 |
-
-##### Results
-We have corrected 100 records containing the value `cashh`, standardized all payment method names, and retained missing values as NULL. Payment_Method now contains only valid payment methods.
-
----
-
-#### Customer_Type
-| Field | Issue |
-|---------|---------|
-| Customer_Type | Invalid customer type values (`123`) |
-| Customer_Type | Unapproved customer category (`Neighbor`) |
-
-##### Checking values
-
-```sql
-SELECT
-Customer_Type,
-COUNT(*)
-FROM silver_sarisari_v9
-GROUP BY Customer_Type
-ORDER BY Customer_Type;
-```
-
-The `Customer_Type` column contains five unique values:
-
-- `Walk-in`
-- `Regular`
-- `Neighbor`
-- `123`
-- `NULL`
-
-`Walk-in` (1,620 records) and `Regular` (1,547 records) were identified as valid customer types.
-
-`Neighbor` (1,582 records) and `123` (104 records) were identified as invalid values.
-
-Additionally, 247 records contained missing (`NULL`) customer type values.
-
-##### Cleaning
-
-```sql
-CREATE OR REPLACE TEMP VIEW silver_sarisari_v10 AS
-SELECT
-CASE
-WHEN Customer_Type IN ('123')
-THEN NULL
-ELSE Customer_Type
-END AS Customer_Type,
-Date,
-Item,
-Payment_Method,
-Quantity,
-Total_Amount,
-Transaction_ID,
-Unit_Price
-FROM silver_sarisari_v9;
-
--- Validation
-SELECT
-Customer_Type,
-COUNT(*)
-FROM silver_sarisari_v10
-GROUP BY Customer_Type
-ORDER BY Customer_Type;
-```
-
-A `CASE` statement was used to replace the invalid customer types `123` and `Neighbor` with `NULL`, while keeping valid values unchanged.
-
-##### Results
-After cleaning, the `Customer_Type` column contains these values:
-
-| Customer_Type | Count |
-|---------------|------:|
-| NULL | 344 |
-| Neighbor | 1,547 |
-| Regular | 1,515 |
-| Walk-in | 1,600 |
-
-The increase in NULL values is expected because the invalid customer types `123` (104 records) were converted to NULL.
-
-As a result, all invalid customer type values were successfully removed, leaving only the approved customer categories (`Regular`, `Neighbor`, and `Walk-in`) and records with missing customer type information.
-
----
-
-# 3. Final Validation and Output Creation
-
-### Goal
-
-Perform final quality checks on the cleaned dataset and create the final Silver Layer table for reporting and analysis.
-
-#### Final Validation
-
-Before publishing the dataset, a series of validation checks were performed to ensure that the cleaning process was successfully applied and that the dataset was suitable for downstream use.
-
-##### Validate Row Count
-
-```sql
-SELECT COUNT(*) AS final_row_count
-FROM silver_sarisari_v10;
-```
-
-This confirms the final number of records remaining after all cleaning activities.
-##### Validate Schema
-
-```sql
-DESCRIBE silver_sarisari_v10;
-```
-
-This confirms that all columns are present and stored using the expected data types.
-
-##### Review Final Data Quality
-
-```sql
-SELECT
-    COUNT(*) AS total_records,
-    COUNT(CASE WHEN Item IS NULL THEN 1 END) AS missing_items,
-    COUNT(CASE WHEN Quantity IS NULL THEN 1 END) AS missing_quantities,
-    COUNT(CASE WHEN Unit_Price IS NULL THEN 1 END) AS missing_unit_prices,
-    COUNT(CASE WHEN Payment_Method IS NULL THEN 1 END) AS missing_payment_methods,
-    COUNT(CASE WHEN Customer_Type IS NULL THEN 1 END) AS missing_customer_types
-FROM silver_sarisari_v10;
-```
-
-This provides a final summary of remaining missing values that could not be reliably corrected.
-
-##### Review Sample Records
-
-```sql
-SELECT *
-FROM silver_sarisari_v10
-LIMIT 20;
-```
-
-A sample review was conducted to verify that cleaning rules were applied correctly and that values appeared reasonable.
-
----
-
-### Create the Final Silver Table
-
-After validation was completed, the cleaned dataset was persisted to the Silver Layer.
-
-```sql
-CREATE OR REPLACE TABLE d4_indiv.silver_sarisari AS
-SELECT *
-FROM silver_sarisari_v10;
-```
-
----
-
-### Verify Table Creation
-
-```sql
-SELECT COUNT(*) AS final_record_count
-FROM silver_sarisari;
-```
-
-```sql
-SELECT *
-FROM silver_sarisari
-LIMIT 20;
-```
-
-These checks confirm that:
-
-- The table was successfully created.
-- The expected records were loaded.
-- The final dataset is available for analysis and reporting.
-
----
-
-# 4. Conclusion and analysis
-## Data Quality Improvement: Bronze vs Silver
-
-| Metric | Bronze | Silver | Change |
-|----------|------:|------:|------:|
-| Total Records | 5,100 | 5,006 | -94 |
-| Missing Items | 253 | 250 | -3 |
-| Missing Quantities | 246 | 43 | -203 |
-| Missing Unit Prices | 247 | 22 | -225 |
-| Missing Payment Methods | 250 | 246 | -4 |
-| Missing Customer Types | 247 | 344 | +97 |
-
-## Analysis
-
-- Total records decreased from **5,100 to 5,006**, indicating that 94 duplicate, invalid, or otherwise removable records were excluded during cleaning.
-- Missing **Quantity** values decreased significantly from **246 to 43**, with 203 records successfully recovered using available transaction information.
-- Missing **Unit_Price** values decreased from **247 to 22**, showing that most missing prices were successfully reconstructed or corrected.
-- Missing **Item** values improved slightly from **253 to 250**, suggesting limited opportunities for reliable recovery.
-- Missing **Payment_Method** values showed minimal improvement, decreasing from **250 to 246**.
-- Missing **Customer_Type** values increased from **247 to 344**. This increase likely resulted from standardizing invalid customer type values (e.g., placeholder or unexpected entries) to `NULL`, improving data consistency at the expense of completeness.
-
-## Key Outcomes
-
-✅ Recovered 203 missing Quantity values
-
-✅ Reduced missing Unit_Price values by 225 records
-
-✅ Removed placeholder and invalid Unit_Price values
-
-✅ Corrected 79 Quantity mismatches using mathematically derived quantities
-
-✅ Preserved negative transaction records for review rather than making unsupported assumptions
-
-⚠️ 43 Quantity values remain unrecoverable
-
-⚠️ 22 Unit_Price values remain unrecoverable
-
-⚠️ Customer_Type completeness declined due to standardization of invalid values
-
-## Conclusion
-
-The Silver layer significantly improved data quality by recovering missing values, correcting quantity inconsistencies, and removing invalid pricing records. The largest improvements were observed in the `Quantity` and `Unit_Price` fields, while unresolved records were retained 
 
 ## Final Output
 
 | Attribute | Value |
 |-----------|--------|
-| Table Name | `workspace.d4_indiv.silver_sarisari` |
-| Layer | Silver |
-| Purpose | Cleaned and analysis-ready sales dataset |
 | Source | `workspace.d4_indiv.bronze_sarisari` |
+| Output Table | `workspace.sari_sari_pipeline.sari_sari_transactions_clean` |
+| Layer | Silver |
 | Final Record Count | 5,006 |
+| Purpose | Cleaned and analysis-ready sales dataset |
+
+---
+
+## Skills Demonstrated
+
+- SQL
+- Databricks
+- Data Profiling
+- Data Quality Assessment
+- Data Cleaning
+- Data Standardization
+- Business Rule Validation
+- Data Quality Management
+- Medallion Architecture
+- Data Documentation
+- Data Engineering Best Practices
