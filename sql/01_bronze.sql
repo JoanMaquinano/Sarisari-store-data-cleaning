@@ -143,8 +143,11 @@ FROM sari_sari_transactions_raw
 WHERE Quantity IS NOT NULL
   AND Unit_Price IS NOT NULL
   AND Total_Amount IS NOT NULL
-  AND ROUND(Quantity * Unit_Price, 2)
-      <> ROUND(Total_Amount, 2);
+  AND TRY_CAST(Quantity AS DOUBLE) IS NOT NULL
+  AND ROUND(
+        TRY_CAST(Quantity AS DOUBLE) * Unit_Price,
+        2
+      ) <> ROUND(Total_Amount, 2);
 
 -- ============================================================
 -- PAYMENT METHOD
