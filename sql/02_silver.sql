@@ -243,10 +243,12 @@ SELECT
 
 FROM payment_method_cleaned;
 
+SELECT *
+FROM customer_type_cleaned
+LIMIT 5; 
 -- ============================================================
 -- STEP 10: CREATE FINAL SILVER TABLE
 -- ============================================================
-
 CREATE OR REPLACE TABLE sari_sari_transactions_clean AS
 SELECT
     CAST(Transaction_ID AS INT) AS Transaction_ID,
