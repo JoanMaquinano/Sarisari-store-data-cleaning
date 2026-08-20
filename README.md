@@ -264,7 +264,7 @@ Applied the following corrections:
 
 - Converted `two` to `2`
 - Corrected invalid `353` values when recoverable
-- Recovered missing quantities using:
+- Attempted to recover missing quantities using:
 
 ```text
 Quantity = Total_Amount ÷ Unit_Price
@@ -274,9 +274,11 @@ Quantity = Total_Amount ÷ Unit_Price
 
 | Metric | Count |
 |----------|------:|
-| Quantity Mismatches Corrected | 79 |
-| Missing Quantities Recovered | 202 |
-| Remaining Missing Quantities | 43 |
+| Remaining Missing Quantities | 245 |
+
+Many Quantity values could not be reliably recovered because supporting Unit_Price values were missing, invalid, or unavailable.
+
+As a result, these records were retained as NULL to preserve data integrity.
 
 ---
 
@@ -293,7 +295,6 @@ Applied the following corrections:
 
 | Metric | Count |
 |----------|------:|
-| Missing Unit Prices Recovered | 230 |
 | Remaining NULL Unit_Price | 22 |
 | Remaining Negative Unit_Price | 4 |
 | Placeholder Values Remaining | 0 |
@@ -322,7 +323,12 @@ Converted invalid values:
 
 Valid categories were retained.
 
-**Result:** 104 invalid Customer_Type values removed.
+**Results**
+
+| Metric | Count |
+|----------|------:|
+| Invalid Customer_Type Values Converted to NULL | 104 |
+| Remaining NULL Customer_Type | 344 |
 
 ---
 
@@ -349,11 +355,12 @@ This ensures calculations, aggregations, filtering, and reporting can be perform
 | Check | Result |
 |---------|------:|
 | Duplicate Records Removed | 94 |
-| Quantity Values Recovered | 202 |
 | Quantity Mismatches Corrected | 79 |
-| Missing Unit Prices Recovered | 230 |
 | Placeholder Unit Prices Removed | 47 |
-| Invalid Customer Types Removed | 104 |
+| Invalid Customer Types Converted to NULL | 104 |
+| Remaining Missing Quantities | 245 |
+| Remaining Missing Unit Prices | 22 |
+| Remaining Negative Unit Prices | 4 |
 
 ### Final Outcome
 
@@ -390,10 +397,12 @@ The final validation process focused on:
 |----------|------:|
 | Total Records | 5,006 |
 | Missing Items | 250 |
-| Missing Quantities | 43 |
+| Missing Quantities | 245 |
 | Missing Unit Prices | 22 |
 | Missing Payment Methods | 246 |
 | Missing Customer Types | 344 |
+| Remaining Placeholder Prices | 0 |
+| Remaining Negative Unit Prices | 4 |
 
 ### Data Quality Review
 
